@@ -31,11 +31,35 @@ must hook in, and each such file is listed in
     snapshot time and the device-wide `hideSeen` flag (default on). A post
     is hidden only if this device knew it was seen (`knownAt`) at or before
     the snapshot time. The snapshot moves only when the Following query
-    fetches its first page (open or refresh), so posts seen while scrolling
-    stay on screen until the next refresh.
+    fetches its first page (open or refresh) and when the toggle switches to
+    hiding (`switchHideSeen()`), so posts seen while scrolling stay on screen
+    until the next refresh or toggle.
+  - `hideSeenSetting.ts`: remembers `hideSeen` per device, in the fork's own
+    `cloudless_device` store (`localStorage` on web), apart from upstream's
+    device store. If storage fails, the choice lasts for the session and
+    the default is to hide.
   - `context.tsx`: `SeenFeedProvider`, mounted around legacy Home, exposes
-    `{did, snapshotTime, hideSeen}`, and `useHideSeenTuner()` builds the
-    tuner from it. Without the provider, nothing is hidden.
+    `{did, snapshotTime, hideSeen, anchorRows}`, and `useHideSeenTuner()`
+    builds the tuner from it. After each switch it scrolls the recorded
+    anchor back into place, before paint and again on the next frame.
+    Without the provider, nothing is hidden and the toggle is not shown.
+  - `useToggleHideSeen.ts`: the show/hide switch. It records the anchor
+    post, moves the snapshot when switching to hiding, puts the wrapper's
+    `savedCursor` back on the last cached Following page when switching to
+    showing (`setQueriesData`), and flips `hideSeen`. The cached pages are
+    re-tuned; nothing is fetched.
+  - `SeenToggle.tsx`: the eye button in the Home header, shown only while
+    the Following tab is selected. Its label names its action ("Show seen
+    posts" / "Hide seen posts"). It is positioned beside the feeds button
+    without taking layout space.
+  - `anchor.ts` and `SeenAnchorRow.tsx`: keeping the reader's place. Each
+    Following post row registers its DOM node. The anchor is the first row
+    at or below the header (or a row under the header that fills at least
+    half the screen); after the switch the page scrolls so it, or the
+    nearest remaining row below it, then above it, is back where it was.
+    The browser's own scroll anchoring is paused meanwhile, and the page
+    scrolls with `window.scrollTo`, which the shell treats as programmatic,
+    so the phone-width header stays put.
   - `tuner.ts`: the Following feed tuner. It drops a unit when its last item
     (the newest post: the reply in a reply unit, the original in a repost)
     is seen as of the snapshot, or when the unit entered the timeline before
@@ -48,15 +72,22 @@ must hook in, and each such file is listed in
     100 posts at a time and keeps going (up to 10 requests) until it has a
     post the feed would show that is not seen, so a long run of seen posts
     does not stall the feed. It ends the feed at the look-back limit by
-    returning no cursor, and keeps the real cursor in `savedCursor`. It never
-    drops posts from what it returns, except Discover posts after Home's
-    fallback marker.
+    returning no cursor, and keeps the real cursor in `savedCursor` (reset on
+    every fetch, so it always belongs to the latest page). It never drops
+    posts from what it returns, except Home's fallback marker and the
+    Discover posts after it, which it holds back for showing seen posts
+    (`HELD_BACK_CURSOR`). While seen posts are shown it passes requests
+    through and notes which cursors lead past the look-back limit; back in
+    hiding, a request from one of them returns an empty page with no cursor
+    and no network request. If seen posts are shown while a hiding request
+    is in flight, that page keeps its cursor.
   - `lookBack.ts`: a feed item's timeline time (repost time for reposts) for
     the look-back limit. The limit is the earliest `seenAt` among entries
     known at the snapshot, so the first session on an empty list has no
     limit, and the limit moves forward as the list rolls past 100,000.
   - `CaughtUp.tsx`: "You're all caught up", shown in place of Following's
     official empty and end-of-feed messages while seen posts are hidden and
-    the account has seen something.
+    the account has seen something. Its "Show seen posts" button uses the
+    same switch as the header button.
   - `home.ts`: pins Home to the legacy version, which these hooks use.
   - `testing/fakeIndexedDb.ts`: a small in-memory IndexedDB for unit tests.

@@ -2,12 +2,15 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
 } from 'react'
 
 import {type FeedTunerFn} from '#/lib/api/feed-manip'
 import {useSession} from '#/state/session'
+import {SeenAnchorRows} from './anchor'
 import {
   getHideSeen,
   getSeenSnapshotTime,
@@ -30,6 +33,11 @@ export type SeenFeedContextValue = {
    * Whether Following hides seen posts.
    */
   hideSeen: boolean
+  /**
+   * The Following feed's post rows, for keeping the reader's place when the
+   * show/hide toggle switches. `undefined` without a provider.
+   */
+  anchorRows: SeenAnchorRows | undefined
 }
 
 /**
@@ -40,6 +48,7 @@ const SeenFeedContext = createContext<SeenFeedContextValue>({
   did: undefined,
   snapshotTime: undefined,
   hideSeen: false,
+  anchorRows: undefined,
 })
 SeenFeedContext.displayName = 'SeenFeedContext'
 
@@ -54,6 +63,20 @@ export function SeenFeedProvider({children}: {children: React.ReactNode}) {
     did ? getSeenSnapshotTime(did) : undefined,
   )
   const hideSeen = useSyncExternalStore(subscribeToSeenFeedState, getHideSeen)
+  const [anchorRows] = useState(() => new SeenAnchorRows())
+
+  /*
+   * The toggle records the anchor before it switches. The feed below has
+   * re-rendered by the time this runs, so the anchor goes back in place
+   * before the browser paints, and once more on the next frame for content
+   * that settles after the first layout.
+   */
+  useLayoutEffect(() => {
+    anchorRows.restore({keep: true})
+    const frame = requestAnimationFrame(() => anchorRows.restore())
+    return () => cancelAnimationFrame(frame)
+  }, [anchorRows, hideSeen])
+  useEffect(() => () => anchorRows.release(), [anchorRows])
 
   useEffect(() => {
     if (!did) return
@@ -63,7 +86,7 @@ export function SeenFeedProvider({children}: {children: React.ReactNode}) {
   }, [did])
 
   return (
-    <SeenFeedContext value={{did, snapshotTime, hideSeen}}>
+    <SeenFeedContext value={{did, snapshotTime, hideSeen, anchorRows}}>
       {children}
     </SeenFeedContext>
   )

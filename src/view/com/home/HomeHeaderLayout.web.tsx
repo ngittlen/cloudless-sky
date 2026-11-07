@@ -15,10 +15,12 @@ import {Hashtag_Stroke2_Corner0_Rounded as FeedsIcon} from '#/components/icons/H
 import * as Layout from '#/components/Layout'
 import {Link} from '#/components/Link'
 import {useAnalytics} from '#/analytics'
+import {HomeHeaderSeenToggle} from '#/features/cloudless/seen/SeenToggle'
 
 export function HomeHeaderLayout(props: {
   children: React.ReactNode
   tabBarAnchor: JSX.Element | null | undefined
+  showSeenToggle?: boolean
 }) {
   const {gtMobile} = useBreakpoints()
   if (!gtMobile) {
@@ -31,9 +33,11 @@ export function HomeHeaderLayout(props: {
 function HomeHeaderLayoutDesktopAndTablet({
   children,
   tabBarAnchor,
+  showSeenToggle,
 }: {
   children: React.ReactNode
   tabBarAnchor: JSX.Element | null | undefined
+  showSeenToggle?: boolean
 }) {
   const t = useTheme()
   const {onLayout} = useShellHeaderLayout()
@@ -53,6 +57,7 @@ function HomeHeaderLayoutDesktopAndTablet({
             <View style={[a.flex_1, a.align_center, a.justify_center]}>
               <Logo width={logoVariant === 'kawaii' ? 60 : 28} />
             </View>
+            {showSeenToggle && <HomeHeaderSeenToggle layout="desktop" />}
             <Link
               to="/feeds"
               hitSlop={HITSLOP_10}

@@ -22,6 +22,11 @@ export const SEARCH_PAGE_SIZE = 100
  * they run out, the page returns with a cursor and the next page carries on.
  */
 export const MAX_SEARCH_REQUESTS = 10
+/**
+ * The saved cursor where hiding cut off Home's fallback to Discover. It
+ * stands for the page that was held back and never reaches the inner API.
+ */
+export const HELD_BACK_CURSOR = 'cloudless:held-back'
 
 /**
  * Wraps the Following feed's API. It never hides posts itself: what it
@@ -36,19 +41,41 @@ export const MAX_SEARCH_REQUESTS = 10
  *   run of seen posts does not stall the feed;
  * - ends the feed at the look-back limit (the moment the oldest remembered
  *   post was seen) by returning no cursor, and keeps the real cursor in
- *   {@link savedCursor};
+ *   {@link savedCursor}, which the show/hide toggle puts back to keep
+ *   loading while seen posts are shown;
+ * - answers a request that starts past the look-back limit with an empty
+ *   page and no cursor, without a network request, so switching back to
+ *   hiding ends the feed at the limit again;
  * - answers the "new posts" check with nothing when the newest post is
  *   already seen.
  *
- * While seen posts are shown, it passes requests through unchanged.
+ * While seen posts are shown, it passes requests through unchanged, noting
+ * which cursors lead past the look-back limit.
  */
 export class SeenFilteringFeedAPI implements FeedAPI {
   /**
-   * The cursor the timeline would continue from where hiding ended the feed
-   * (at the look-back limit, or where Home would fall back to Discover).
-   * Showing seen posts can put it back to keep loading.
+   * The cursor the timeline would continue from where hiding ended the
+   * latest page (at the look-back limit, or {@link HELD_BACK_CURSOR} where
+   * Home falls back to Discover), or `undefined` when the latest page was
+   * not ended by hiding. Showing seen posts can put it back to keep loading.
    */
   savedCursor: string | undefined
+
+  /**
+   * Cursors whose following posts all entered the timeline before a
+   * look-back limit, each with that limit. A cursor still leads past any
+   * limit at or after the one it was measured against.
+   */
+  private pastLookBack = new Map<string, number>()
+
+  /**
+   * The Discover fallback that hiding cut off: Home's marker and the posts
+   * after it, with the cursor that follows them. Showing seen posts gets it
+   * from {@link HELD_BACK_CURSOR}.
+   */
+  private heldBack:
+    | {feed: app.bsky.feed.defs.FeedViewPost[]; cursor: string | undefined}
+    | undefined
 
   private feedTuners: FeedTunerFn[]
   private lists: SeenListRegistry
@@ -93,6 +120,7 @@ export class SeenFilteringFeedAPI implements FeedAPI {
   }
 
   async fetch(params: FetchParams): Promise<FeedAPIResponse> {
+    this.savedCursor = undefined
     const isFirstPage = !params.cursor
     const list = this.lists.get(this.did)
     if (isFirstPage) {
@@ -106,13 +134,57 @@ export class SeenFilteringFeedAPI implements FeedAPI {
     const asOf = isFirstPage
       ? this.now()
       : (getSeenSnapshotTime(this.did) ?? this.now())
-    const res = getHideSeen()
-      ? await this.fetchHiding(params, list, list.oldestSeenAt(asOf))
-      : await this.inner.fetch(params)
+    const lookBack = list.oldestSeenAt(asOf)
+    let res: FeedAPIResponse
+    if (getHideSeen()) {
+      res = await this.fetchHiding(params, list, lookBack)
+      if (!res.cursor && this.savedCursor !== undefined && !getHideSeen()) {
+        /*
+         * Seen posts were shown while this page loaded. The toggle found no
+         * cursor to restore then, so carry on past the limit here.
+         */
+        res = {...res, cursor: this.savedCursor}
+        this.savedCursor = undefined
+      }
+    } else if (params.cursor === HELD_BACK_CURSOR && this.heldBack) {
+      res = this.heldBack
+      this.notePastLookBack(params.cursor, res, lookBack)
+    } else {
+      res = await this.inner.fetch(params)
+      this.notePastLookBack(params.cursor, res, lookBack)
+    }
     if (isFirstPage) {
       setSeenSnapshotTime(this.did, this.now())
     }
     return res
+  }
+
+  /**
+   * Whether every post after `cursor` entered the timeline before
+   * `lookBack`, or comes from Home's fallback to Discover.
+   */
+  private startsPastLookBack(
+    cursor: string | undefined,
+    lookBack: number | undefined,
+  ): boolean {
+    if (cursor === undefined || lookBack === undefined) return false
+    const measured = this.pastLookBack.get(cursor)
+    return measured !== undefined && measured <= lookBack
+  }
+
+  private notePastLookBack(
+    cursor: string | undefined,
+    res: FeedAPIResponse,
+    lookBack: number | undefined,
+  ) {
+    if (!res.cursor || lookBack === undefined) return
+    if (this.startsPastLookBack(cursor, lookBack)) {
+      this.pastLookBack.set(res.cursor, this.pastLookBack.get(cursor!)!)
+    } else if (res.feed.some(isFallbackMarker)) {
+      this.pastLookBack.set(res.cursor, -Infinity)
+    } else if (res.feed.some(item => isBeforeLookBack(item, lookBack))) {
+      this.pastLookBack.set(res.cursor, lookBack)
+    }
   }
 
   private async fetchHiding(
@@ -120,6 +192,10 @@ export class SeenFilteringFeedAPI implements FeedAPI {
     list: SeenList,
     lookBack: number | undefined,
   ): Promise<FeedAPIResponse> {
+    if (this.startsPastLookBack(cursor, lookBack)) {
+      this.savedCursor = cursor
+      return {feed: []}
+    }
     const feed: app.bsky.feed.defs.FeedViewPost[] = []
     let next = cursor
     for (let request = 0; request < MAX_SEARCH_REQUESTS; request++) {
@@ -147,12 +223,15 @@ export class SeenFilteringFeedAPI implements FeedAPI {
         const marker = res.feed.findIndex(isFallbackMarker)
         if (marker !== -1) {
           feed.push(...res.feed.slice(0, marker))
-          this.savedCursor = next
+          this.heldBack = {feed: res.feed.slice(marker), cursor: next}
+          this.savedCursor = HELD_BACK_CURSOR
+          this.pastLookBack.set(HELD_BACK_CURSOR, -Infinity)
           return {feed}
         }
         if (res.feed.some(item => isBeforeLookBack(item, lookBack))) {
           feed.push(...res.feed)
           this.savedCursor = next
+          if (next) this.pastLookBack.set(next, lookBack)
           return {feed}
         }
       }
@@ -177,6 +256,38 @@ export class SeenFilteringFeedAPI implements FeedAPI {
       const last = slice.items[slice.items.length - 1]
       return !!last && !list.get(last.post.uri)
     })
+  }
+}
+
+type CachedFeedPage = {
+  api: FeedAPI
+  cursor: string | undefined
+}
+
+/**
+ * Puts the saved cursor back on the last cached page of a Following feed
+ * that hiding ended, so that showing seen posts keeps loading past the
+ * look-back limit. Returns `data` itself when there is nothing to restore,
+ * which leaves the cache untouched.
+ */
+export function restoreSavedCursor<
+  Data extends {pages: CachedFeedPage[]} | undefined,
+>(data: Data): Data {
+  const pages = data?.pages
+  const last = pages?.[pages.length - 1]
+  if (
+    !data ||
+    !pages ||
+    !last ||
+    last.cursor ||
+    !(last.api instanceof SeenFilteringFeedAPI) ||
+    last.api.savedCursor === undefined
+  ) {
+    return data
+  }
+  return {
+    ...data,
+    pages: [...pages.slice(0, -1), {...last, cursor: last.api.savedCursor}],
   }
 }
 

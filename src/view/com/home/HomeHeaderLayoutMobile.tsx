@@ -28,12 +28,15 @@ import * as Layout from '#/components/Layout'
 import {Link} from '#/components/Link'
 import {useAnalytics} from '#/analytics'
 import {IS_DEV, IS_LIQUID_GLASS, IS_NATIVE} from '#/env'
+import {HomeHeaderSeenToggle} from '#/features/cloudless/seen/SeenToggle'
 
 export function HomeHeaderLayoutMobile({
   children,
+  showSeenToggle,
 }: {
   children: React.ReactNode
   tabBarAnchor: React.ReactElement | null | undefined
+  showSeenToggle?: boolean
 }) {
   const t = useTheme()
   const {_} = useLingui()
@@ -96,6 +99,9 @@ export function HomeHeaderLayoutMobile({
           </View>
 
           <Layout.Header.Slot>
+            {hasSession && showSeenToggle && (
+              <HomeHeaderSeenToggle layout="mobile" />
+            )}
             {hasSession && (
               <Link
                 testID="viewHeaderHomeFeedPrefsBtn"

@@ -1,20 +1,25 @@
 import {View} from 'react-native'
-import {Trans} from '@lingui/react/macro'
+import {Trans, useLingui} from '@lingui/react/macro'
 
 import {FollowingEmptyState} from '#/view/com/posts/FollowingEmptyState'
 import {FollowingEndOfFeed} from '#/view/com/posts/FollowingEndOfFeed'
 import {atoms as a, useTheme} from '#/alf'
+import {Button, ButtonIcon, ButtonText} from '#/components/Button'
 import {CircleCheck_Stroke2_Corner0_Rounded as CircleCheckIcon} from '#/components/icons/CircleCheck'
+import {Eye_Stroke2_Corner0_Rounded as EyeIcon} from '#/components/icons/Eye'
 import {Text} from '#/components/Typography'
 import {useSeenFeed} from './context'
 import {getSeenLists} from './seenList'
+import {useToggleHideSeen} from './useToggleHideSeen'
 
 /**
  * The end of Following while seen posts are hidden: everything new has been
- * seen.
+ * seen. Its button shows seen posts again, as the header's eye button does.
  */
 export function CaughtUp() {
   const t = useTheme()
+  const {t: l} = useLingui()
+  const {toggle} = useToggleHideSeen()
   return (
     <View
       testID="cloudlessCaughtUp"
@@ -32,6 +37,17 @@ export function CaughtUp() {
         ]}>
         <Trans>You’ve seen every new post from the people you follow.</Trans>
       </Text>
+      <Button
+        testID="cloudlessCaughtUpShowSeen"
+        label={l`Show seen posts`}
+        size="small"
+        color="secondary"
+        onPress={toggle}>
+        <ButtonIcon icon={EyeIcon} />
+        <ButtonText>
+          <Trans>Show seen posts</Trans>
+        </ButtonText>
+      </Button>
     </View>
   )
 }

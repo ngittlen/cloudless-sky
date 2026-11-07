@@ -68,6 +68,7 @@ import {PostFeedSkeleton} from '#/components/PostFeedSkeleton'
 import {RichText} from '#/components/RichText'
 import {useAnalytics} from '#/analytics'
 import {IS_IOS, IS_NATIVE, IS_WEB} from '#/env'
+import {useSeenAnchorRenderItem} from '#/features/cloudless/seen/SeenAnchorRow'
 import {DiscoverFeedLiveEventFeedsAndTrendingBanner} from '#/features/liveEvents/components/DiscoverFeedLiveEventFeedsAndTrendingBanner'
 import {
   isStatusStillActive,
@@ -1140,6 +1141,8 @@ let PostFeed = ({
     [feedFeedback, feed, liveNowConfig, getPostPosition, ax],
   )
 
+  const renderRow = useSeenAnchorRenderItem(feed, renderItem)
+
   return (
     <View testID={testID} style={style}>
       <List
@@ -1147,7 +1150,7 @@ let PostFeed = ({
         ref={scrollElRef}
         data={feedItems}
         keyExtractor={(item: FeedRow) => item.key}
-        renderItem={renderItem}
+        renderItem={renderRow}
         ListFooterComponent={FeedFooter}
         ListHeaderComponent={ListHeaderComponent}
         refreshing={isPTRing}
