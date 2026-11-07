@@ -31,9 +31,9 @@ must hook in, and each such file is listed in
     snapshot time and the device-wide `hideSeen` flag (default on). A post
     is hidden only if this device knew it was seen (`knownAt`) at or before
     the snapshot time. The snapshot moves only when the Following query
-    fetches its first page (open or refresh) and when the toggle switches to
-    hiding (`switchHideSeen()`), so posts seen while scrolling stay on screen
-    until the next refresh or toggle.
+    fetches its first page (open or refresh) and when the toggle switches
+    (`switchHideSeen()`), so posts seen while scrolling stay on screen, and
+    gain no badge, until the next refresh or toggle.
   - `hideSeenSetting.ts`: remembers `hideSeen` per device, in the fork's own
     `cloudless_device` store (`localStorage` on web), apart from upstream's
     device store. If storage fails, the choice lasts for the session and
@@ -44,7 +44,7 @@ must hook in, and each such file is listed in
     anchor back into place, before paint and again on the next frame.
     Without the provider, nothing is hidden and the toggle is not shown.
   - `useToggleHideSeen.ts`: the show/hide switch. It records the anchor
-    post, moves the snapshot when switching to hiding, puts the wrapper's
+    post, moves the snapshot to now, puts the wrapper's
     `savedCursor` back on the last cached Following page when switching to
     showing (`setQueriesData`), and flips `hideSeen`. The cached pages are
     re-tuned; nothing is fetched.
@@ -85,6 +85,15 @@ must hook in, and each such file is listed in
     the look-back limit. The limit is the earliest `seenAt` among entries
     known at the snapshot, so the first session on an empty list has no
     limit, and the limit moves forward as the list rolls past 100,000.
+  - `SeenBadge.tsx`: the "Seen" pill shown after the author and time on
+    seen posts while seen posts are shown. `useSeenBadgeFor()` gives
+    `PostFeed` a badge for a unit when its last post was known seen at or
+    before the snapshot (`isSliceSeenAsOf`, the tuner's rule), so the badged
+    posts are exactly the ones hiding would hide, and every post in a unit
+    gets the same answer. Only Following badges, and never while seen posts
+    are hidden. One shared badge element keeps memoized rows stable.
+  - `PostMetaRow.tsx`: the slot `PostFeedItem` uses for the badge. Without an
+    accessory it renders the top line as upstream does.
   - `CaughtUp.tsx`: "You're all caught up", shown in place of Following's
     official empty and end-of-feed messages while seen posts are hidden and
     the account has seen something. Its "Show seen posts" button uses the

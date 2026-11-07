@@ -53,6 +53,7 @@ import {DiscoverDebug} from '#/components/PostControls/DiscoverDebug'
 import {RichText} from '#/components/RichText'
 import {SubtleHover} from '#/components/SubtleHover'
 import {Features, useAnalytics} from '#/analytics'
+import {PostMetaRow} from '#/features/cloudless/seen/PostMetaRow'
 import {useActorStatus} from '#/features/liveNow'
 import {app} from '#/lexicons'
 import * as bsky from '#/types/bsky'
@@ -78,6 +79,10 @@ interface FeedItemProps {
   hideTopBorder?: boolean
   isParentBlocked?: boolean
   isParentNotFound?: boolean
+  /**
+   * Shown after the author and time on the post's top line.
+   */
+  metaAccessory?: React.ReactNode
 }
 
 export function PostFeedItem({
@@ -98,6 +103,7 @@ export function PostFeedItem({
   isParentNotFound,
   rootPost,
   onShowLess,
+  metaAccessory,
 }: FeedItemProps & {
   post: app.bsky.feed.defs.PostView
   rootPost: app.bsky.feed.defs.PostView
@@ -137,6 +143,7 @@ export function PostFeedItem({
           isParentNotFound={isParentNotFound}
           rootPost={rootPost}
           onShowLess={onShowLess}
+          metaAccessory={metaAccessory}
         />
       </ReportDialogMetadataContext.Provider>
     )
@@ -163,6 +170,7 @@ let FeedItemInner = ({
   isParentNotFound,
   rootPost,
   onShowLess,
+  metaAccessory,
 }: FeedItemProps & {
   richText: RichTextAPI
   post: Shadow<app.bsky.feed.defs.PostView>
@@ -419,13 +427,15 @@ let FeedItemInner = ({
                 additionalCauses: additionalPostAlerts,
               }),
             ]}>
-            <PostMeta
-              author={post.author}
-              moderation={moderation}
-              timestamp={post.indexedAt}
-              postHref={href}
-              onOpenAuthor={onOpenAuthor}
-            />
+            <PostMetaRow accessory={metaAccessory}>
+              <PostMeta
+                author={post.author}
+                moderation={moderation}
+                timestamp={post.indexedAt}
+                postHref={href}
+                onOpenAuthor={onOpenAuthor}
+              />
+            </PostMetaRow>
             {showReplyTo &&
               (parentAuthor || isParentBlocked || isParentNotFound) && (
                 <PostRepliedTo

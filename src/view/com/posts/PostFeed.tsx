@@ -69,6 +69,7 @@ import {RichText} from '#/components/RichText'
 import {useAnalytics} from '#/analytics'
 import {IS_IOS, IS_NATIVE, IS_WEB} from '#/env'
 import {useSeenAnchorRenderItem} from '#/features/cloudless/seen/SeenAnchorRow'
+import {useSeenBadgeFor} from '#/features/cloudless/seen/SeenBadge'
 import {DiscoverFeedLiveEventFeedsAndTrendingBanner} from '#/features/liveEvents/components/DiscoverFeedLiveEventFeedsAndTrendingBanner'
 import {
   isStatusStillActive,
@@ -807,6 +808,7 @@ let PostFeed = ({
   // rendering
   // =
 
+  const seenBadgeFor = useSeenBadgeFor(feed)
   const renderItem = useCallback(
     ({item: row, index: rowIndex}: ListRenderItemInfo<FeedRow>) => {
       if (row.type === 'empty') {
@@ -891,6 +893,7 @@ let PostFeed = ({
             hideTopBorder={rowIndex === 0 && indexInSlice === 0}
             rootPost={slice.items[0].post}
             onShowLess={onPressShowLess}
+            metaAccessory={seenBadgeFor(slice)}
           />
         )
       } else if (row.type === 'sliceViewFullThread') {
@@ -945,6 +948,7 @@ let PostFeed = ({
       feedCacheKey,
       onPressShowLess,
       t,
+      seenBadgeFor,
     ],
   )
 

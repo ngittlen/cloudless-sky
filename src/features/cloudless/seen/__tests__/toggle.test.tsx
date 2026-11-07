@@ -214,13 +214,13 @@ describe('snapshot time on switch', () => {
     expect(getSeenSnapshotTime(ME)).toBe(NOW)
   })
 
-  it('stays put when switching to showing', () => {
+  it('moves to now when switching to showing, for the badges', () => {
     setSeenSnapshotTime(ME, NOW - 10 * MINUTE)
 
     switchHideSeen(ME, false, NOW)
 
     expect(getHideSeen()).toBe(false)
-    expect(getSeenSnapshotTime(ME)).toBe(NOW - 10 * MINUTE)
+    expect(getSeenSnapshotTime(ME)).toBe(NOW)
   })
 
   it('never moves backwards', () => {

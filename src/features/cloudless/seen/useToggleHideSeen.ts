@@ -13,9 +13,9 @@ import {restoreSavedCursor} from './SeenFilteringFeedAPI'
  * button and the "caught up" message. Switching keeps the post the reader is
  * looking at in place:
  *
- * 1. it records the first post row at or below the header;
- * 2. switching to hiding moves the snapshot to now, so every post seen so
- *    far is hidden;
+ * 1. it records the post being read (see `chooseScrollAnchor`);
+ * 2. it moves the snapshot to now, so every post seen so far is hidden, or
+ *    carries a "Seen" badge while seen posts are shown;
  * 3. switching to showing puts the cursor that hiding held back onto the
  *    last loaded page, so loading carries on past the look-back limit;
  * 4. it flips the setting, which re-tunes the cached pages without a
