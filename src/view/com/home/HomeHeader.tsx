@@ -8,6 +8,7 @@ import {getLocalizedFeedName} from '#/lib/strings/feed-names'
 import {type FeedSourceInfo} from '#/state/queries/feed'
 import {useSession} from '#/state/session'
 import {type RenderTabBarFnProps} from '#/view/com/pager/Pager'
+import {useShowSeenToggle} from '#/features/cloudless/seen/SeenToggle'
 import {TabBar} from '../pager/TabBar'
 import {HomeHeaderLayout} from './HomeHeaderLayout'
 
@@ -22,6 +23,7 @@ export function HomeHeader(
   const {hasSession} = useSession()
   const {t: l, i18n} = useLingui()
   const navigation = useNavigation<NavigationProp>()
+  const showSeenToggle = useShowSeenToggle(feeds[props.selectedPage])
 
   const hasPinnedCustom = useMemo<boolean>(() => {
     if (!hasSession) return false
@@ -55,7 +57,9 @@ export function HomeHeader(
   )
 
   return (
-    <HomeHeaderLayout tabBarAnchor={props.tabBarAnchor}>
+    <HomeHeaderLayout
+      tabBarAnchor={props.tabBarAnchor}
+      showSeenToggle={showSeenToggle}>
       <TabBar
         key={items.join(',')}
         onPressSelected={props.onPressSelected}

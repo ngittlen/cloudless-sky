@@ -1,6 +1,6 @@
 import {i18n} from '@lingui/core'
 import {I18nProvider} from '@lingui/react'
-import {act, render, screen} from '@testing-library/react-native'
+import {act, fireEvent, render, screen} from '@testing-library/react-native'
 
 import {
   FollowingEmptyStateOrCaughtUp,
@@ -39,6 +39,37 @@ jest.mock('#/components/icons/CircleCheck', () => ({
 jest.mock('#/components/Typography', () => ({
   Text: jest.requireActual<typeof import('react-native')>('react-native').Text,
 }))
+jest.mock('#/components/icons/Eye', () => ({
+  Eye_Stroke2_Corner0_Rounded: () => null,
+}))
+jest.mock('#/components/Button', () => {
+  const {Pressable: MockPressable, Text: MockText} =
+    jest.requireActual<typeof import('react-native')>('react-native')
+  return {
+    Button: ({
+      label,
+      onPress,
+      children,
+    }: {
+      label: string
+      onPress: () => void
+      children: React.ReactNode
+    }) => (
+      <MockPressable
+        accessibilityLabel={label}
+        accessibilityHint=""
+        onPress={onPress}>
+        {children}
+      </MockPressable>
+    ),
+    ButtonIcon: () => null,
+    ButtonText: MockText,
+  }
+})
+const mockToggle = jest.fn()
+jest.mock('#/features/cloudless/seen/useToggleHideSeen', () => ({
+  useToggleHideSeen: () => ({hideSeen: true, toggle: mockToggle}),
+}))
 
 let mockDid = 'did:plc:caught-up-1'
 let didCounter = 1
@@ -76,6 +107,16 @@ describe.each([
 
     expect(screen.getByTestId('cloudlessCaughtUp')).toBeTruthy()
     expect(screen.queryByText(official)).toBeNull()
+  })
+
+  it('offers to show seen posts, using the header toggle', () => {
+    seeSomething()
+    mockToggle.mockClear()
+    renderWith(<Component />)
+
+    fireEvent.press(screen.getByLabelText('Show seen posts'))
+
+    expect(mockToggle).toHaveBeenCalledTimes(1)
   })
 
   it('shows the official message with an empty seen list', () => {

@@ -4,19 +4,30 @@
  * components.
  */
 
+import {
+  createDeviceHideSeenStore,
+  createMemoryHideSeenStore,
+  type HideSeenSettingStore,
+  loadHideSeen,
+  saveHideSeen,
+} from './hideSeenSetting'
+
 type Listener = () => void
 
 /**
- * Per account: posts known seen at or before this time are hidden. It moves
- * only when the Following query fetches its first page (open or refresh) and
- * when the show/hide toggle switches to hiding, so posts seen while
- * scrolling never vanish from a feed that is already on screen.
+ * Per account: posts known seen at or before this time are hidden, or carry
+ * a "Seen" badge while seen posts are shown. It moves only when the Following
+ * query fetches its first page (open or refresh) and when the show/hide
+ * toggle switches, so posts seen while scrolling never vanish from, or gain a
+ * badge in, a feed that is already on screen.
  */
 const snapshotTimes = new Map<string, number>()
+let settingStore: HideSeenSettingStore = createDeviceHideSeenStore()
 /**
- * Whether Following hides seen posts. Device-wide.
+ * Whether Following hides seen posts. Device-wide and remembered across
+ * restarts; read from storage on first use.
  */
-let hideSeen = true
+let hideSeen: boolean | undefined
 const listeners = new Set<Listener>()
 
 function notify() {
@@ -46,20 +57,49 @@ export function setSeenSnapshotTime(did: string, time: number) {
 }
 
 export function getHideSeen(): boolean {
+  hideSeen ??= loadHideSeen(settingStore)
   return hideSeen
 }
 
+/**
+ * Sets and remembers whether Following hides seen posts.
+ */
 export function setHideSeen(value: boolean) {
-  if (hideSeen === value) return
+  if (getHideSeen() === value) return
   hideSeen = value
+  saveHideSeen(settingStore, value)
   notify()
 }
 
 /**
- * Test-only: back to the defaults.
+ * Switches between hiding and showing seen posts, for the show/hide toggle.
+ * The snapshot moves to `now` in the same update, so the feed re-renders
+ * once: hiding covers every post seen so far, including those seen while
+ * seen posts were shown, and "Seen" badges cover the same posts.
  */
-export function resetSeenFeedStateForTests() {
+export function switchHideSeen(
+  did: string | undefined,
+  hide: boolean,
+  now: number,
+) {
+  const current = did ? snapshotTimes.get(did) : undefined
+  if (did && (current === undefined || current < now)) {
+    snapshotTimes.set(did, now)
+  }
+  hideSeen = hide
+  saveHideSeen(settingStore, hide)
+  notify()
+}
+
+/**
+ * Test-only: back to the defaults. `store` stands in for the device's
+ * storage; the remembered choice is read from it on next use.
+ */
+export function resetSeenFeedStateForTests(
+  store: HideSeenSettingStore = createMemoryHideSeenStore(),
+) {
   snapshotTimes.clear()
-  hideSeen = true
+  settingStore = store
+  hideSeen = undefined
   notify()
 }

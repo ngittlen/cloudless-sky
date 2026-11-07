@@ -1,9 +1,13 @@
-import {type FeedTunerFn, type FeedViewPostsSlice} from '#/lib/api/feed-manip'
+import {type FeedTunerFn} from '#/lib/api/feed-manip'
 import {getSeenSnapshotTime} from './feedState'
 import {isBeforeLookBack} from './lookBack'
 import {getSeenLists, type SeenList, type SeenListRegistry} from './seenList'
 
-type SliceLike = Pick<FeedViewPostsSlice, 'items'>
+/**
+ * The part of a feed unit the seen check reads, shared by the tuner's slices
+ * and the feed's rendered slices.
+ */
+type SliceLike = {items: {post: {uri: string}}[]}
 
 const hideSeenTuners = new WeakSet<FeedTunerFn>()
 
