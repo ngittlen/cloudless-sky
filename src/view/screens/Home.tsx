@@ -50,6 +50,7 @@ import {NoFeedsPinned} from '#/screens/Home/NoFeedsPinned'
 import * as Layout from '#/components/Layout'
 import {useAnalytics} from '#/analytics'
 import {IS_NATIVE, IS_WEB} from '#/env'
+import {SeenFeedProvider} from '#/features/cloudless/seen/context'
 import {useDemoMode} from '#/storage/hooks/demo-mode'
 
 type Props = NativeStackScreenProps<HomeTabNavigatorParams, 'Home' | 'Start'>
@@ -94,11 +95,13 @@ export function HomeScreen(props: Props) {
     return (
       <Layout.Screen testID="HomeScreen" noInsetTop={IS_NATIVE}>
         <HomeHeaderModeProvider>
-          <HomeScreenReady
-            {...props}
-            preferences={preferences}
-            pinnedFeedInfos={pinnedFeedInfos}
-          />
+          <SeenFeedProvider>
+            <HomeScreenReady
+              {...props}
+              preferences={preferences}
+              pinnedFeedInfos={pinnedFeedInfos}
+            />
+          </SeenFeedProvider>
         </HomeHeaderModeProvider>
       </Layout.Screen>
     )

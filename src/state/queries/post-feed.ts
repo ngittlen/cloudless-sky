@@ -39,6 +39,7 @@ import {DEFAULT_LOGGED_OUT_PREFERENCES} from '#/state/queries/preferences/const'
 import {useAppviewClient, useSession} from '#/state/session'
 import * as userActionHistory from '#/state/userActionHistory'
 import {KnownError} from '#/view/com/posts/PostFeedErrorMessage'
+import {withSeenFiltering} from '#/features/cloudless/seen/SeenFilteringFeedAPI'
 import {app} from '#/lexicons'
 import * as bsky from '#/types/bsky'
 import {useFeedTuners} from '../preferences/feed-tuners'
@@ -404,7 +405,11 @@ export async function pollLatest(page: FeedPage | undefined) {
   return false
 }
 
-function createApi({
+function createApi(args: Parameters<typeof createBaseApi>[0]) {
+  return withSeenFiltering(args, createBaseApi)
+}
+
+function createBaseApi({
   feedDesc,
   feedParams,
   feedTuners,

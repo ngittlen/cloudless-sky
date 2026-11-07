@@ -46,14 +46,14 @@ describe.each([
     mockIsNative = isNative
   })
 
-  it('renders the fork when following v2 is enabled', () => {
+  // Cloudless Sky pins the legacy home, which hiding seen posts hooks into.
+  it('renders the legacy home even when following v2 is enabled', () => {
     mockEnabled.mockReturnValue(true)
 
     render(<HomeScreen {...props} />)
 
-    expect(mockEnabled).toHaveBeenCalledWith('following_v2:enable')
-    expect(screen.getByText('following v2 home')).toBeTruthy()
-    expect(screen.queryByText('legacy home')).toBeNull()
+    expect(screen.getByText('legacy home')).toBeTruthy()
+    expect(screen.queryByText('following v2 home')).toBeNull()
   })
 
   it('renders the legacy home when following v2 is disabled', () => {
