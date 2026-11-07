@@ -262,6 +262,154 @@ Compare pass and fail, not counts. The fork adds its own test suites under
 merge brings in a new upstream failure, record it here with the upstream
 commit it first appears in.
 
+## Building and running the container
+
+Production runs one container image built from the upstream `Dockerfile`. It
+has three stages:
+
+1. **web-build** (`ghcr.io/pnpm/pnpm:11`): `pnpm install --frozen-lockfile`,
+   `pnpm intl:build`, then `pnpm build-web`. The Metro web export lands in
+   `dist/`, and `scripts/post-web-build.js` copies it into `bskyweb/static`
+   and writes `bskyweb/templates/scripts.html` and `fonts.html`.
+2. **go-build** (`golang:1.26.10-bookworm`): compiles the `bskyweb` Go server
+   with the templates and static files embedded.
+3. **runtime** (`debian:bookworm-slim`): runs `/usr/bin/bskyweb` under
+   `dumb-init`.
+
+All three base images publish `linux/arm64` builds (checked against the
+registries). The Go stage builds for Docker's `TARGETARCH`, the architecture
+of the image being built. It defaults to the build host's, so a plain
+`docker build` on the Apple M4 host produces a native arm64 image with no x86
+emulation. Don't pass `--platform linux/amd64`.
+
+### Build
+
+From the repo root, on a machine with Docker Engine (BuildKit, the default
+builder, is required for `TARGETARCH` and the `RUN --mount` cache):
+
+```bash
+docker build -t cloudless-sky:latest \
+  --build-arg EXPO_PUBLIC_ENV=production \
+  --build-arg EXPO_PUBLIC_BUNDLE_IDENTIFIER="$(git rev-parse --short HEAD)" \
+  .
+```
+
+`EXPO_PUBLIC_BUNDLE_IDENTIFIER` is optional. It shows the commit in the app's
+settings (**Settings → About**); without it the app shows `dev`. The release
+version comes from `package.json`.
+
+The `.dockerignore` (fork-only) keeps `.git`, `node_modules`, `.env*` files
+and locally generated web and embed build output out of the build context, so
+a build from a working copy that has run `pnpm install` or `pnpm build-web`
+produces the same image as a fresh clone.
+
+**Memory:** the Dockerfile sets `NODE_OPTIONS=--max-old-space-size=8192`
+because Metro's web export runs out of heap at Node's default. A local
+`pnpm build-web` on the ARM64 dev VM took about 2 minutes and peaked at about
+7.8 GB resident memory. Give Docker at least 8 GB for the build itself, plus
+headroom for everything else running on the host; with less, the build fails
+with a V8 out-of-memory error or the kernel kills it. The Docker build adds
+`pnpm install` and `pnpm intl:build` in front, so expect roughly 5 to 10
+minutes in total.
+
+### Build arguments
+
+| Argument | Value | Why |
+| -------- | ----- | --- |
+| `EXPO_PUBLIC_ENV` | `production` | The Dockerfile defaults to `development`. On web, the only code that reads it is the Sentry setup (the environment label), and Sentry is off. `__DEV__` is `false` in an export either way. `production` matches the official bsky.app build. |
+| `EXPO_PUBLIC_SENTRY_DSN` | leave unset | Sentry error reporting is off when the DSN is empty. |
+| `SENTRY_AUTH_TOKEN` | leave unset | The Dockerfile defaults it to `unknown`, so `post-web-build.js` skips uploading source maps to Sentry. |
+| `EXPO_PUBLIC_BUNDLE_IDENTIFIER` | commit hash (optional) | Shown in the app's settings. |
+
+The Dockerfile has no argument for `EXPO_PUBLIC_METRICS_API_HOST`, so the
+image never sets it and usage metrics stay off (see
+[Analytics and error reporting](#analytics-and-error-reporting)).
+
+### Run
+
+```bash
+docker run --rm --name cloudless-sky \
+  -p 127.0.0.1:8100:8100 \
+  -e ATP_APPVIEW_HOST=https://public.api.bsky.app \
+  -e ROBOTS_DISALLOW_ALL=true \
+  cloudless-sky:latest /usr/bin/bskyweb serve
+```
+
+Then open <http://localhost:8100>. The image's default command runs
+`bskyweb` with no subcommand, which prints its help and exits, so the run
+command must end in `/usr/bin/bskyweb serve`.
+
+### Runtime settings
+
+| Variable | Value | Why |
+| -------- | ----- | --- |
+| `ATP_APPVIEW_HOST` | `https://public.api.bsky.app` | Bluesky's public AppView. The server fetches posts and profiles from it to render link previews and titles for direct links. Its default, `http://localhost:2584`, only exists in a local atproto dev environment. |
+| `HTTP_ADDRESS` | default `:8100` | Listens on all interfaces inside the container, which Docker's port publishing needs. Restrict access on the host side by publishing to `127.0.0.1` only. |
+| `ROBOTS_DISALLOW_ALL` | `true` | `/robots.txt` disallows all crawling. |
+| `BSKY_APP_VERSION` | leave unset | When set, the server loads the app from Bluesky's S3 bucket in place of the embedded build. |
+| `FEATURE_GATE_BOOTSTRAP` | default `true` | The server fetches feature flags from `GROWTHBOOK_API_HOST` (default `https://events.bsky.app/gb`) and embeds them in the HTML, so pages render with the right flags before the client fetches them. |
+| `BASIC_AUTH_PASSWORD` | optional | Puts HTTP basic auth (username `admin`) in front of every route. The tailnet already limits who can reach the app. |
+
+`bskyweb` also serves Prometheus metrics on `:9090` inside the container
+(`METRICS_HTTP_ADDRESS`). Those are local server metrics, not sent anywhere,
+and the run command doesn't publish the port.
+
+There is no dedicated health endpoint. Use `GET /robots.txt` (or `GET /`) to
+check that the server is up. With `BASIC_AUTH_PASSWORD` set, these return
+`401` without credentials, which still shows the server is responding.
+
+### Analytics and error reporting
+
+Cloudless Sky sends no usage analytics or error reports to Bluesky:
+
+- **Usage metrics** (`POST https://events.bsky.app/t`): upstream sends them
+  whenever `EXPO_PUBLIC_METRICS_API_HOST` is unset, because the host falls
+  back to `events.bsky.app`. Unless that variable is set,
+  `src/features/cloudless/metrics.ts` turns the metrics client's `track` and
+  its send path into no-ops, so the client never queues an event, starts its
+  flush timer or sends a request. This applies to `pnpm web` too. A test in
+  `src/features/cloudless/__tests__/metrics.test.ts` fails when upstream adds
+  or renames a `MetricsClient` method, as a prompt to check the policy still
+  covers every send path.
+- **Sentry**: off while `EXPO_PUBLIC_SENTRY_DSN` is empty (and always in
+  `__DEV__`).
+- **bitdrift**: not part of the web app. Only the native build config
+  (`app.config.js`) includes it.
+
+**Feature flags stay on.** Bluesky's GrowthBook flags decide which app
+features are enabled. The app keeps fetching them from
+`https://events.bsky.app/gb/...`, and `bskyweb` keeps embedding them in the
+HTML. The app's flag host defaults to `<metrics host>/gb`, which is
+`https://events.bsky.app/gb` while `EXPO_PUBLIC_METRICS_API_HOST` is unset. If
+you ever set a metrics host, also set
+`EXPO_PUBLIC_GROWTHBOOK_API_HOST=https://events.bsky.app/gb`. Otherwise the
+app looks for flags on your metrics host, and it rejects the flags `bskyweb`
+embeds because their host no longer matches.
+
+To check in a browser: open the network panel, sign in and scroll for a
+minute. Expect requests to the PDS and AppView, `events.bsky.app/gb/...`
+(feature flags), `ip.bsky.app` (region-based defaults),
+`app-config.workers.bsky.app` and `live-events.workers.bsky.app`
+(configuration), and media CDNs. There should be no requests to
+`events.bsky.app/t` and none to `sentry.io`.
+
+### Running the production build without Docker
+
+To check a production build on a machine without Docker (this is how the
+build was verified on the dev VM), build the web bundle and the Go server
+directly. This needs Go 1.26.10 (the version in `bskyweb/go.mod`) and a C
+compiler for the SQLite driver:
+
+```bash
+NODE_OPTIONS=--max-old-space-size=8192 EXPO_PUBLIC_ENV=production pnpm build-web
+cd bskyweb
+go build -trimpath -tags timetzdata -o bskyweb ./cmd/bskyweb
+ATP_APPVIEW_HOST=https://public.api.bsky.app HTTP_ADDRESS=127.0.0.1:8100 \
+  ROBOTS_DISALLOW_ALL=true ./bskyweb serve
+```
+
+The build output and the binary are gitignored.
+
 ## Upstream files the fork changes
 
 These are the only upstream files Cloudless Sky changes. Expect merge conflicts
@@ -274,6 +422,17 @@ in them, and nowhere else.
 | `bskyweb/templates/base.html` | The default `<title>` and `application-name` say "Cloudless Sky", and an `apple-mobile-web-app-title` meta tag labels the home-screen icon "Cloudless Sky". | 1.1 |
 | `bskyweb/templates/home.html` | The server-rendered title of `/` says "Cloudless Sky". It shows until the app's JavaScript sets the page title. | 1.1 |
 | `bskyweb/templates/error.html` | Server error pages are titled `Error {{ statusCode }} - Cloudless Sky`. | 1.1 |
+| `Dockerfile` | The Go stage builds for Docker's `TARGETARCH` (`ARG TARGETARCH`, `ENV GOARCH=$TARGETARCH`) in place of a hardcoded `amd64`. | 1.3 |
+| `src/analytics/metrics/index.ts` | The shared metrics client is wrapped in `applyMetricsPolicy()` from `src/features/cloudless/metrics.ts`, which turns off usage metrics unless `EXPO_PUBLIC_METRICS_API_HOST` is set. | 1.3 |
+
+Fork-only files outside `src/features/cloudless/` (no upstream counterpart,
+so no content conflicts; an add/add conflict is possible only if upstream
+creates a file at the same path):
+
+| File | Purpose | Story |
+| ---- | ------- | ----- |
+| `docs/cloudless-sky.md` | This guide | 1.1 |
+| `.dockerignore` | Keeps `.git`, `node_modules`, `.env*` files and generated build output out of the Docker build context | 1.3 |
 
 Upstream files deliberately left unchanged:
 

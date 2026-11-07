@@ -6,3 +6,4 @@ must hook in, and each such file is listed in
 [`docs/cloudless-sky.md`](../../../docs/cloudless-sky.md#upstream-files-the-fork-changes).
 
 - `appName.ts`: the product name used in page titles.
+- `metrics.ts`: turns off usage metrics unless a metrics host is configured.
