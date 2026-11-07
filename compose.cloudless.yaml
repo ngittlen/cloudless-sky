@@ -1,0 +1,36 @@
+# Cloudless Sky production deployment on the `cloudless-sky` VM. See
+# "Deploying and updating" in docs/cloudless-sky.md.
+#
+#   CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
+#     docker compose -f compose.cloudless.yaml up -d --build
+name: cloudless-sky
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        EXPO_PUBLIC_ENV: production
+        # Shown in Settings -> About. Empty falls back to "dev".
+        EXPO_PUBLIC_BUNDLE_IDENTIFIER: ${CLOUDLESS_COMMIT:-}
+        # EXPO_PUBLIC_SENTRY_DSN stays unset (error reporting off). The
+        # Dockerfile has no metrics-host argument, so usage metrics stay off.
+    image: cloudless-sky:latest
+    # The image's default command prints bskyweb's help and exits.
+    command: ['/usr/bin/bskyweb', 'serve']
+    # Comes back after a crash, a Docker restart or a VM reboot, unless
+    # stopped explicitly with `docker compose stop` or `down`.
+    restart: unless-stopped
+    ports:
+      # Loopback only, so nothing on the network reaches the container
+      # directly. Tailnet devices come in through Tailscale Serve on the VM.
+      - '127.0.0.1:8100:8100'
+    environment:
+      ATP_APPVIEW_HOST: https://public.api.bsky.app
+      # Must match the container port published above.
+      HTTP_ADDRESS: ':8100'
+      ROBOTS_DISALLOW_ALL: 'true'
+      # Feature flags use bskyweb's defaults (GROWTHBOOK_API_HOST,
+      # FEATURE_GATE_BOOTSTRAP), which upstream keeps in step with the web
+      # bundle's own default. Pinning them here could drift from it.

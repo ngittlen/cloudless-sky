@@ -1,0 +1,36 @@
+# Cloudless Sky: limits the Docker build context to the source tree, so an
+# image built from a working copy matches one built from a fresh clone.
+#
+# - The image installs its own dependencies (`pnpm install --frozen-lockfile`).
+# - The Dockerfile writes its own .env from build arguments; `expo export`
+#   would also load any local .env.* file, baking its settings into the bundle.
+# - bskyweb embeds everything under static/ and templates/ (go:embed), so
+#   locally generated web and embed build output must stay out.
+# - No build step reads .git, and its churn would invalidate the layer cache.
+.git
+**/node_modules
+.env*
+bskyweb/.env*
+dist
+web-build
+bskyweb/bskyweb
+bskyweb/embedr
+bskyweb/static/_expo
+bskyweb/static/assets
+bskyweb/static/js/*.js
+bskyweb/static/js/*.map
+bskyweb/static/js/*.js.LICENSE.txt
+bskyweb/static/css/*.css
+bskyweb/static/css/*.map
+bskyweb/static/css/*.css.LICENSE.txt
+bskyweb/static/media/*.png
+bskyweb/static/embed/*.html
+bskyweb/static/embed/assets/*.js
+bskyweb/static/embed/assets/*.css
+bskyweb/templates/scripts.html
+bskyweb/templates/fonts.html
+bskyweb/templates/*-embed.html
+bskyweb/embedr-static/post-*.js
+bskyweb/embedr-static/post-*.css
+bskyweb/embedr-static/index-*.js
+bskyweb/embedr-static/polyfills-*.js

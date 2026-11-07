@@ -77,7 +77,11 @@ WORKDIR /usr/src/social-app
 
 ENV GODEBUG="netdns=go"
 ENV GOOS="linux"
-ENV GOARCH="amd64"
+# BuildKit sets TARGETARCH to the architecture of the image being built,
+# which defaults to the build host's (arm64 on Apple silicon), so a plain
+# `docker build` produces a binary that runs natively on that host.
+ARG TARGETARCH
+ENV GOARCH=$TARGETARCH
 ENV CGO_ENABLED=1
 ENV GOEXPERIMENT="loopvar"
 
