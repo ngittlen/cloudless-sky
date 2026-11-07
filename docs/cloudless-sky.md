@@ -213,6 +213,23 @@ Linux), and is shared by every checkout on the machine. After a second clone, or
 Metro can reuse a cached transform whose generated file doesn't exist in this
 `node_modules`.
 
+### Syncing seen posts in development
+
+`pnpm web` doesn't sync the seen list unless it is told where the sync
+service is, because the dev server runs on a different origin from
+production's `/sync`. To try sync locally, run the service in dev mode (it
+allows CORS from `http://localhost:*`) and point the app at it:
+
+```bash
+cd cloudless-sync && pnpm install && pnpm dev     # 127.0.0.1:8101, data in cloudless-sync/data/
+EXPO_PUBLIC_CLOUDLESS_SYNC_URL=http://localhost:8101/sync pnpm web
+```
+
+Open the app at `http://localhost:8081` (not the `.orb.local` name, whose
+origin dev-mode CORS doesn't allow). The browser console logs every sync:
+`[cloudless] seen sync: synced` with what was received and sent, `pushed on
+hide`, and `sync failed` with the retry delay.
+
 ### Signing in
 
 Sign in with your handle and a Bluesky **app password**, not your main
@@ -450,6 +467,14 @@ post read on one device is hidden on the others. The app and the service share
 one origin, so the browser needs no CORS setup. There is no login of its own:
 being on the tailnet is the only access control, as for the app.
 
+The production web build syncs with `/sync` on its own origin (Story 4.2,
+`src/features/cloudless/sync/`): on open, every 30 seconds while visible, a
+few seconds after posts are seen, and when the app is hidden. Posts seen on
+another device are hidden from the next refresh of Following on. Opening the
+app through `http://localhost:8100` on the Mac skips Tailscale Serve, so
+`/sync` reaches `bskyweb` instead and sync fails quietly there; use the
+tailnet address.
+
 The container's settings live in `compose.cloudless.yaml` at the repo root:
 the build arguments and runtime settings from
 [Building and running the container](#building-and-running-the-container),
@@ -619,6 +644,23 @@ docker run --rm -v cloudless-sky_sync-data:/data -v "$PWD":/out alpine \
   cp /data/seen.sqlite /out/seen-backup.sqlite
 docker compose -f compose.cloudless.yaml start sync
 ```
+
+**Seen-list sync** (needs two devices or browsers signed in to the same
+account, on the tailnet):
+
+1. On device A, scroll Following until some posts have been on screen.
+2. Within about a minute, refresh Following on device B (pull down, or tap
+   the Following tab). Those posts are hidden there, and showing seen posts
+   (the eye button) shows them with the "Seen" badge. Posts that sync brings
+   in never vanish from a feed that is already on screen; only the refresh
+   hides them.
+3. The same works between iPhone Safari and the iPhone home-screen app,
+   which keep separate local lists.
+4. Turn Tailscale off on device A, scroll some more, then turn it back on and
+   reopen the app. Within a minute, device B hides those posts after a
+   refresh too.
+5. With two accounts on one device, switch between them: each account's seen
+   posts stay its own.
 
 ### Adding it to the iPhone home screen
 

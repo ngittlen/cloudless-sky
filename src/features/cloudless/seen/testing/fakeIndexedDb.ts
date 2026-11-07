@@ -1,9 +1,10 @@
 /*
  * A small in-memory IndexedDB for unit tests. It covers only what
  * `seen/db.ts` uses: opening with an upgrade, object stores with array key
- * paths, compound indexes, get, put, getAll, count, and index cursors with
- * delete. Requests in a transaction run in order, asynchronously, and the
- * transaction completes once no requests remain, as in a browser.
+ * paths, compound indexes, get, put, getAll (on stores and indexes), count,
+ * and index cursors with delete. Requests in a transaction run in order,
+ * asynchronously, and the transaction completes once no requests remain, as
+ * in a browser.
  *
  * The repo has no fake-indexeddb dependency, and adding one would change
  * package.json and the lockfile, which conflicts with upstream merges.
@@ -193,6 +194,14 @@ class FakeIndex {
         (a, b) =>
           compareKeys(a.indexKey, b.indexKey) || compareKeys(a.key, b.key),
       )
+  }
+
+  getAll(range: FakeKeyRange, count?: number) {
+    return this.tx.request(req => {
+      const values = this.entries(range).map(r => structuredClone(r.value))
+      req.result = count === undefined ? values : values.slice(0, count)
+      req.onsuccess?.()
+    })
   }
 
   count(range: FakeKeyRange) {

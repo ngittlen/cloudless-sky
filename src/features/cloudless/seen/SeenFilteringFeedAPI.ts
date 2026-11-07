@@ -137,7 +137,7 @@ export class SeenFilteringFeedAPI implements FeedAPI {
     const lookBack = list.oldestSeenAt(asOf)
     let res: FeedAPIResponse
     if (getHideSeen()) {
-      res = await this.fetchHiding(params, list, lookBack)
+      res = await this.fetchHiding(params, list, lookBack, asOf)
       if (!res.cursor && this.savedCursor !== undefined && !getHideSeen()) {
         /*
          * Seen posts were shown while this page loaded. The toggle found no
@@ -191,6 +191,7 @@ export class SeenFilteringFeedAPI implements FeedAPI {
     {cursor, signal}: FetchParams,
     list: SeenList,
     lookBack: number | undefined,
+    asOf: number,
   ): Promise<FeedAPIResponse> {
     if (this.startsPastLookBack(cursor, lookBack)) {
       this.savedCursor = cursor
@@ -238,23 +239,27 @@ export class SeenFilteringFeedAPI implements FeedAPI {
 
       feed.push(...res.feed)
       if (!next || next === previous) break
-      if (this.hasUnseen(res.feed, list)) break
+      if (this.hasUnseen(res.feed, list, asOf)) break
     }
     return {feed, cursor: next}
   }
 
   /**
    * Whether the page has a unit the feed would show: one its other tuners
-   * keep and whose newest post is not seen.
+   * keep and whose newest post was not known seen at `asOf`, the time the
+   * hiding tuner compares with. Posts learned later (from sync, another
+   * tab, or a sighting while scrolling) are shown, so they end the search
+   * like any unseen post.
    */
   private hasUnseen(
     feed: app.bsky.feed.defs.FeedViewPost[],
     list: SeenList,
+    asOf: number,
   ): boolean {
     const slices = new FeedTuner(this.feedTuners).tune(feed, {dryRun: true})
     return slices.some(slice => {
       const last = slice.items[slice.items.length - 1]
-      return !!last && !list.get(last.post.uri)
+      return !!last && !list.isSeenAsOf(last.post.uri, asOf)
     })
   }
 }

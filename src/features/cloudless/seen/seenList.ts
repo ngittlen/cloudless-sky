@@ -84,6 +84,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
+function isEntry(value: unknown): value is SeenEntry {
+  if (!value || typeof value !== 'object') return false
+  const e = value as Partial<SeenEntry>
+  return (
+    typeof e.uri === 'string' &&
+    typeof e.seenAt === 'number' &&
+    Number.isFinite(e.seenAt)
+  )
+}
+
 function isChannelMessage(data: unknown): data is SeenChannelMessage {
   if (!data || typeof data !== 'object') return false
   const m = data as Partial<SeenChannelMessage>
@@ -126,6 +136,19 @@ export class SeenList {
   private disposed = false
   private lookBackCache:
     {version: number; asOf: number; value: number | undefined} | undefined
+  /**
+   * Posts this tab recorded that the sync service has not confirmed, by URI.
+   * With storage, it is this session's share of the `dirty` records, held
+   * in memory so a page being hidden can send them without waiting for
+   * IndexedDB. Without storage, it is the only record of what to send.
+   */
+  private unsynced = new Map<string, number>()
+  /**
+   * The sync position (`lastSyncServerTime`) when there is no storage to
+   * keep it in.
+   */
+  private memorySyncTime: number | undefined
+  private addListeners = new Set<() => void>()
 
   constructor(did: string, deps: SeenListDeps) {
     this.did = did
@@ -191,6 +214,10 @@ export class SeenList {
       if (queued === undefined || queued < seenAt) {
         this.pending.set(uri, seenAt)
       }
+      const unsynced = this.unsynced.get(uri)
+      if (unsynced === undefined || unsynced < seenAt) {
+        this.unsynced.set(uri, seenAt)
+      }
     }
     this.version++
     if (!this.storage) {
@@ -199,6 +226,120 @@ export class SeenList {
     } else {
       this.scheduleFlush()
     }
+    for (const listener of this.addListeners) listener()
+  }
+
+  /**
+   * Calls `listener` after every {@link add}. Returns an unsubscribe
+   * function.
+   */
+  onAdd(listener: () => void): () => void {
+    this.addListeners.add(listener)
+    return () => {
+      this.addListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Up to `limit` entries the sync service does not have yet. Pending
+   * sightings are written first, so they are included.
+   */
+  async readUnsynced(limit: number): Promise<SeenEntry[]> {
+    await this.ready
+    await this.flush()
+    const storage = this.storage
+    if (storage) return storage.readDirty(this.did, limit)
+    return this.peekUnsynced(limit)
+  }
+
+  /**
+   * Up to `limit` posts this tab recorded and the sync service has not
+   * confirmed, newest first, straight from memory.
+   */
+  peekUnsynced(limit = Infinity): SeenEntry[] {
+    const entries: SeenEntry[] = []
+    const all = [...this.unsynced]
+    for (let i = all.length - 1; i >= 0 && entries.length < limit; i--) {
+      entries.push({uri: all[i][0], seenAt: all[i][1]})
+    }
+    return entries
+  }
+
+  /**
+   * Records that the sync service accepted `entries`. An entry seen again
+   * since it was read stays unsynced.
+   */
+  async markSynced(entries: SeenEntry[]): Promise<void> {
+    for (const entry of entries) {
+      if (this.unsynced.get(entry.uri) === entry.seenAt) {
+        this.unsynced.delete(entry.uri)
+      }
+    }
+    const storage = this.storage
+    if (storage && entries.length > 0) {
+      await storage.markSynced(this.did, entries)
+    }
+  }
+
+  /**
+   * The sync service's `serverTime` at the last complete pull, or
+   * `undefined` before the first.
+   */
+  async getSyncTime(): Promise<number | undefined> {
+    await this.ready
+    const storage = this.storage
+    if (!storage) return this.memorySyncTime
+    return (await storage.readMeta(this.did))?.lastSyncServerTime
+  }
+
+  async setSyncTime(time: number | undefined): Promise<void> {
+    const storage = this.storage
+    if (!storage) {
+      this.memorySyncTime = time
+      return
+    }
+    await storage.writeMeta({did: this.did, lastSyncServerTime: time})
+  }
+
+  /**
+   * Merges entries pulled from the sync service: stored as synced where new
+   * or later, added to memory with `knownAt` set to now (so nothing already
+   * on screen changes), trimmed to the limit, and announced to other tabs.
+   * Rejects when storage fails, so the pull is retried.
+   */
+  async applySynced(entries: SeenEntry[]): Promise<void> {
+    await this.ready
+    if (this.disposed) return
+    const valid = entries.filter(isEntry)
+    for (const entry of valid) {
+      const unsynced = this.unsynced.get(entry.uri)
+      // The service holds this sighting or a later one.
+      if (unsynced !== undefined && unsynced <= entry.seenAt) {
+        this.unsynced.delete(entry.uri)
+      }
+    }
+    const storage = this.storage
+    if (storage) {
+      const result = await storage.write(this.did, valid, {dirty: 0})
+      if (this.disposed) return
+      if (result.written.length > 0 || result.evicted.length > 0) {
+        const message: SeenChannelMessage = {
+          type: 'written',
+          did: this.did,
+          entries: result.written,
+          evicted: result.evicted,
+        }
+        this.receive(message)
+        this.deps.channel?.postMessage(message)
+      }
+      return
+    }
+    const now = this.deps.now()
+    for (const entry of valid) {
+      this.merge(entry.uri, entry.seenAt, now)
+    }
+    this.version++
+    this.enforceLimit()
   }
 
   /**
@@ -231,11 +372,7 @@ export class SeenList {
     if (this.disposed) return
     const now = this.deps.now()
     for (const entry of message.entries) {
-      if (
-        entry &&
-        typeof entry.uri === 'string' &&
-        typeof entry.seenAt === 'number'
-      ) {
+      if (isEntry(entry)) {
         this.merge(entry.uri, entry.seenAt, now)
       }
     }
@@ -253,6 +390,8 @@ export class SeenList {
     clearTimeout(this.flushTimer)
     this.entries.clear()
     this.pending.clear()
+    this.unsynced.clear()
+    this.addListeners.clear()
   }
 
   private merge(uri: string, seenAt: number, knownAt: number) {
