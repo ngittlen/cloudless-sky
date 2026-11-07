@@ -641,6 +641,7 @@ in them, and nowhere else.
 | `Dockerfile` | The Go stage builds for Docker's `TARGETARCH` (`ARG TARGETARCH`, `ENV GOARCH=$TARGETARCH`) in place of a hardcoded `amd64`. | 1.3 |
 | `src/analytics/metrics/index.ts` | The shared metrics client is wrapped in `applyMetricsPolicy()` from `src/features/cloudless/metrics.ts`, which turns off usage metrics unless `EXPO_PUBLIC_METRICS_API_HOST` is set. | 1.3 |
 | `src/view/shell/bottom-bar/BottomBarWeb.tsx` | The web bottom bar adds the bottom safe-area inset as padding (`useWebBottomBarSafeAreaStyle()` from `src/features/cloudless/safeArea.ts`), so it clears the iPhone home indicator in the full-screen home-screen app. | 1.4 |
+| `src/state/feed-feedback.tsx` | `onItemSeen` calls `recordSeenFeedRow()` from `src/features/cloudless/seen` first, before the `enabled` check (which is false for Following). The recorder ignores every feed but Following. The callback's dependency list gains `feed?.feedDescriptor` and `client`. | 2.1 |
 
 Fork-only files outside `src/features/cloudless/` (no upstream counterpart,
 so no content conflicts; an add/add conflict is possible only if upstream
