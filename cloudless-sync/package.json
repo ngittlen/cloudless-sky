@@ -1,0 +1,27 @@
+{
+  "name": "cloudless-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.28.5",
+  "engines": {
+    "node": ">=24.22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node --enable-source-maps dist/bin.js",
+    "dev": "CLOUDLESS_SYNC_DEV=1 node --watch src/bin.ts",
+    "test": "node --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/express": "^4.17.23",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}
