@@ -18,6 +18,7 @@ import {
 } from '#/state/queries/post-feed'
 import {getItemsForFeedback} from '#/view/com/posts/PostFeed'
 import {useAnalytics} from '#/analytics'
+import {recordSeenFeedRow} from '#/features/cloudless/seen'
 import {app} from '#/lexicons'
 import {useAppviewClient} from './session'
 
@@ -197,6 +198,7 @@ export function useFeedFeedback(
 
   const onItemSeen = useCallback(
     (feedItem: any) => {
+      recordSeenFeedRow(feed?.feedDescriptor, client.did, feedItem)
       if (!enabled) {
         return
       }
@@ -216,7 +218,7 @@ export function useFeedFeedback(
         }
       }
     },
-    [enabled, sendToFeed],
+    [enabled, sendToFeed, feed?.feedDescriptor, client],
   )
 
   const sendInteraction = useCallback(

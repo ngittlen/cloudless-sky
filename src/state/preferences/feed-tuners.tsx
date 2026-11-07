@@ -1,6 +1,7 @@
 import {useMemo} from 'react'
 
 import {FeedTuner} from '#/lib/api/feed-manip'
+import {useHideSeenTuner} from '#/features/cloudless/seen/context'
 import {type FeedDescriptor} from '../queries/post-feed'
 import {usePreferencesQuery} from '../queries/preferences'
 import {useSession} from '../session'
@@ -10,6 +11,7 @@ export function useFeedTuners(feedDesc: FeedDescriptor) {
   const langPrefs = useLanguagePrefs()
   const {data: preferences} = usePreferencesQuery()
   const {currentAccount} = useSession()
+  const hideSeenTuner = useHideSeenTuner()
 
   return useMemo(() => {
     if (feedDesc.startsWith('author')) {
@@ -44,9 +46,12 @@ export function useFeedTuners(feedDesc: FeedDescriptor) {
       }
       feedTuners.push(FeedTuner.dedupThreads)
       feedTuners.push(FeedTuner.removeMutedThreads)
+      if (feedDesc === 'following' && hideSeenTuner) {
+        feedTuners.push(hideSeenTuner)
+      }
 
       return feedTuners
     }
     return []
-  }, [feedDesc, currentAccount, preferences, langPrefs])
+  }, [feedDesc, currentAccount, preferences, langPrefs, hideSeenTuner])
 }

@@ -4,6 +4,7 @@ import {
 } from '#/lib/routes/types'
 import {HomeScreen as LegacyHomeScreen} from '#/view/screens/Home'
 import {useAnalytics} from '#/analytics'
+import {FOLLOWING_V2_HOME_ALLOWED} from '#/features/cloudless/seen/home'
 import {isFollowingV2HomeForkEnabled} from '#/features/followingV2/eligibility'
 import {HomeScreen as FollowingV2HomeScreen} from './Home'
 
@@ -16,7 +17,7 @@ export function HomeScreen(
   props: NativeStackScreenProps<HomeTabNavigatorParams, 'Home' | 'Start'>,
 ) {
   const ax = useAnalytics()
-  return isFollowingV2HomeForkEnabled(ax) ? (
+  return FOLLOWING_V2_HOME_ALLOWED && isFollowingV2HomeForkEnabled(ax) ? (
     <FollowingV2HomeScreen {...props} />
   ) : (
     <LegacyHomeScreen {...props} />
