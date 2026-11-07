@@ -60,6 +60,7 @@
     "bskyweb/**",
     "bskyembed/**",
     "bskyogcard/**",
+    "cloudless-sync/**",
     "lint-rules/**",
     "src/locale/locales/_build/**",
     "src/locale/locales/**/*.js",

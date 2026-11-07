@@ -1,5 +1,6 @@
-# Cloudless Sky production deployment on the `cloudless-sky` VM. See
-# "Deploying and updating" in docs/cloudless-sky.md.
+# Cloudless Sky production deployment on the `cloudless-sky` VM: the web app
+# and the seen-list sync service. See "Deploying and updating" in
+# docs/cloudless-sky.md.
 #
 #   CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
 #     docker compose -f compose.cloudless.yaml up -d --build
@@ -34,3 +35,28 @@ services:
       # Feature flags use bskyweb's defaults (GROWTHBOOK_API_HOST,
       # FEATURE_GATE_BOOTSTRAP), which upstream keeps in step with the web
       # bundle's own default. Pinning them here could drift from it.
+
+  # The seen-list sync service (Story 4.1). Tailscale Serve publishes it at
+  # /sync on the app's own address, so the app reaches it same-origin.
+  sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloudless-sync
+    image: cloudless-sync:latest
+    restart: unless-stopped
+    ports:
+      # Loopback only, as for the web container.
+      - '127.0.0.1:8101:8101'
+    volumes:
+      # The SQLite database. A named volume outlives the container, so
+      # rebuilding and `up -d --build` keep the data; only `down -v` or
+      # `docker volume rm` deletes it.
+      - sync-data:/app/data
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8101/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  sync-data:

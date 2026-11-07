@@ -213,6 +213,23 @@ Linux), and is shared by every checkout on the machine. After a second clone, or
 Metro can reuse a cached transform whose generated file doesn't exist in this
 `node_modules`.
 
+### Syncing seen posts in development
+
+`pnpm web` doesn't sync the seen list unless it is told where the sync
+service is, because the dev server runs on a different origin from
+production's `/sync`. To try sync locally, run the service in dev mode (it
+allows CORS from `http://localhost:*`) and point the app at it:
+
+```bash
+cd cloudless-sync && pnpm install && pnpm dev     # 127.0.0.1:8101, data in cloudless-sync/data/
+EXPO_PUBLIC_CLOUDLESS_SYNC_URL=http://localhost:8101/sync pnpm web
+```
+
+Open the app at `http://localhost:8081` (not the `.orb.local` name, whose
+origin dev-mode CORS doesn't allow). The browser console logs every sync:
+`[cloudless] seen sync: synced` with what was received and sent, `pushed on
+hide`, and `sync failed` with the retry delay.
+
 ### Signing in
 
 Sign in with your handle and a Bluesky **app password**, not your main
@@ -244,6 +261,16 @@ pnpm test        # Jest
 Always use these scripts rather than calling the tools directly. `pnpm test`
 runs Jest with `--bail`, so it stops at the first failing suite. To run
 specific tests, pass paths: `pnpm test src/features/cloudless`.
+
+The seen-list sync service in `cloudless-sync/` is a separate pnpm workspace
+that these checks leave out (root Jest and oxlint ignore the folder, and
+`typecheck` only covers `src` and `modules`). Check it on its own:
+
+```bash
+cd cloudless-sync
+pnpm install
+pnpm typecheck && pnpm test && pnpm build
+```
 
 ### Baseline check results
 
@@ -427,9 +454,26 @@ tailnet can reach it.
 iPhone / Mac (on the tailnet)
   └─ https://cloudless-sky.<tailnet>.ts.net        (Tailscale cert)
        └─ tailscale serve on the cloudless-sky VM
-            └─ http://127.0.0.1:8100                 (published on loopback only)
-                 └─ container "web": bskyweb serve   (restart: unless-stopped)
+            ├─ /      → http://127.0.0.1:8100        (published on loopback only)
+            │            └─ container "web": bskyweb serve   (restart: unless-stopped)
+            └─ /sync  → http://127.0.0.1:8101/sync   (published on loopback only)
+                         └─ container "sync": cloudless-sync (restart: unless-stopped)
+                              └─ volume "sync-data": seen.sqlite
 ```
+
+The `sync` container is the seen-list service from `cloudless-sync/`
+(Story 4.1): one seen list per Bluesky account, shared by every device, so a
+post read on one device is hidden on the others. The app and the service share
+one origin, so the browser needs no CORS setup. There is no login of its own:
+being on the tailnet is the only access control, as for the app.
+
+The production web build syncs with `/sync` on its own origin (Story 4.2,
+`src/features/cloudless/sync/`): on open, every 30 seconds while visible, a
+few seconds after posts are seen, and when the app is hidden. Posts seen on
+another device are hidden from the next refresh of Following on. Opening the
+app through `http://localhost:8100` on the Mac skips Tailscale Serve, so
+`/sync` reaches `bskyweb` instead and sync fails quietly there; use the
+tailnet address.
 
 The container's settings live in `compose.cloudless.yaml` at the repo root:
 the build arguments and runtime settings from
@@ -439,9 +483,18 @@ so nothing on the network reaches the container directly and tailnet devices
 come in through Tailscale Serve. OrbStack also forwards the VM's ports to
 `localhost` on the Mac itself, so `http://localhost:8100` works on that Mac.
 That is local to the Mac, not a network exposure. Keep OrbStack's option to
-expose machine ports to the LAN off. Don't run another server on port 8100 in
-the dev VM at the same time, or the Mac's `localhost:8100` may reach the wrong
-one.
+expose machine ports to the LAN off. Don't run another server on port 8100 or
+8101 in the dev VM at the same time, or the Mac's `localhost:8100` (or `8101`)
+may reach the wrong one.
+
+The sync service's settings are in the same file: built from
+`Dockerfile.cloudless-sync`, `restart: unless-stopped`, port `8101` on
+`127.0.0.1` only, and its SQLite database on the named volume `sync-data`
+(Docker names it `cloudless-sky_sync-data`). A named volume outlives the
+container, so rebuilding, `up -d --build`, `down` and restarts keep the data.
+Only `docker compose down -v` or `docker volume rm` deletes it, so never pass
+`-v`. The image uses Node's built-in SQLite (`node:sqlite`), so nothing is
+compiled natively and it builds natively on arm64.
 
 ### One-time setup
 
@@ -516,23 +569,32 @@ CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
 ```
 
 The first build takes several minutes (see the memory notes in
-[Build](#build)). Check that the server answers:
+[Build](#build)). Check that both servers answer:
 
 ```bash
 curl -fsS http://127.0.0.1:8100/robots.txt
-docker compose -f compose.cloudless.yaml ps
+curl -fsS http://127.0.0.1:8101/sync/health   # {"status":"ok"}
+docker compose -f compose.cloudless.yaml ps   # sync shows (healthy) after ~30 s
 ```
 
 **7. Publish it on the tailnet over HTTPS.**
 
 ```bash
 sudo tailscale serve --bg 8100
+sudo tailscale serve --bg --set-path /sync http://127.0.0.1:8101/sync
 tailscale serve status
 ```
 
 `--bg` stores the Serve configuration in `tailscaled`, so it survives
-restarts. It proxies `https://cloudless-sky.<tailnet>.ts.net` to
-`http://127.0.0.1:8100` with a certificate Tailscale issues automatically.
+restarts. The first command proxies `https://cloudless-sky.<tailnet>.ts.net`
+to `http://127.0.0.1:8100` with a certificate Tailscale issues automatically.
+The second sends everything under `/sync` to the sync service. Tailscale
+strips the `/sync` mount point and then appends the rest of the path to the
+target URL, so `/sync/seen` reaches `http://127.0.0.1:8101/sync/seen`. The
+service answers both with and without the `/sync` prefix, so a target of plain
+`http://127.0.0.1:8101` works too. `tailscale serve status` should list both
+`/` and `/sync`. If you deployed before the sync service existed, run just the
+second command.
 The first HTTPS request can take a few seconds while the certificate is
 issued. This is Tailscale **Serve** (tailnet only), not Funnel: nothing is
 exposed to the public internet.
@@ -542,14 +604,18 @@ exposed to the public internet.
 - **From a device on the tailnet**, open
   `https://cloudless-sky.<tailnet>.ts.net`: no certificate warning, and the
   tab title reads "Home — Cloudless Sky".
+- **Sync service, from a device on the tailnet:** open
+  `https://cloudless-sky.<tailnet>.ts.net/sync/health`. It shows
+  `{"status":"ok"}`.
 - **From a device not on the tailnet** (for example the iPhone with
-  Tailscale turned off, on cellular), the address doesn't load: the
-  `ts.net` name only resolves to a tailnet address, which is unreachable
-  from outside.
+  Tailscale turned off, on cellular), the address doesn't load, `/sync`
+  included: the `ts.net` name only resolves to a tailnet address, which is
+  unreachable from outside.
 - **VM restart:** on the Mac, run `orb restart cloudless-sky`, wait a minute,
   then load the address again. Docker starts at boot, `restart:
   unless-stopped` starts the container, and `tailscaled` restores the Serve
-  configuration.
+  configuration. `/sync/health` answers again, and the seen list is intact
+  (the same posts stay hidden after a refresh).
 - **Mac restart:** restart the Mac and log in (see the FileVault note in
   step 1). OrbStack starts at login and starts the machine with it. If the app isn't back within a few minutes,
   check `orb list` on the Mac: if `cloudless-sky` is stopped, start it with
@@ -562,8 +628,39 @@ Inside the VM, useful commands:
 cd ~/cloudless-sky
 docker compose -f compose.cloudless.yaml ps        # status
 docker compose -f compose.cloudless.yaml logs -f   # server logs
+docker compose -f compose.cloudless.yaml logs -f sync   # sync service only
 tailscale serve status                             # what Serve publishes
+docker volume ls                                   # cloudless-sky_sync-data
 ```
+
+The sync service has no backup. If its volume is lost, each device keeps its
+own list, but entries a device has already sent are not sent again, so
+devices stop sharing older history until new posts are seen. To copy the
+database out, stop the service first so the file is consistent:
+
+```bash
+docker compose -f compose.cloudless.yaml stop sync
+docker run --rm -v cloudless-sky_sync-data:/data -v "$PWD":/out alpine \
+  cp /data/seen.sqlite /out/seen-backup.sqlite
+docker compose -f compose.cloudless.yaml start sync
+```
+
+**Seen-list sync** (needs two devices or browsers signed in to the same
+account, on the tailnet):
+
+1. On device A, scroll Following until some posts have been on screen.
+2. Within about a minute, refresh Following on device B (pull down, or tap
+   the Following tab). Those posts are hidden there, and showing seen posts
+   (the eye button) shows them with the "Seen" badge. Posts that sync brings
+   in never vanish from a feed that is already on screen; only the refresh
+   hides them.
+3. The same works between iPhone Safari and the iPhone home-screen app,
+   which keep separate local lists.
+4. Turn Tailscale off on device A, scroll some more, then turn it back on and
+   reopen the app. Within a minute, device B hides those posts after a
+   refresh too.
+5. With two accounts on one device, switch between them: each account's seen
+   posts stay its own.
 
 ### Adding it to the iPhone home screen
 
@@ -599,11 +696,16 @@ cd ~/cloudless-sky
 git checkout main
 git pull --ff-only
 docker tag cloudless-sky:latest cloudless-sky:previous
+docker tag cloudless-sync:latest cloudless-sync:previous   # skip on its first deploy
 CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
   docker compose -f compose.cloudless.yaml up -d --build
 docker image prune -f
 curl -fsS http://127.0.0.1:8100/robots.txt
+curl -fsS http://127.0.0.1:8101/sync/health
 ```
+
+The sync service's database is on the `sync-data` volume, so the rebuild keeps
+it.
 
 The old container keeps serving while the new image builds; Compose then
 replaces it, so the app is down for only a few seconds. The `previous` tag
@@ -616,6 +718,7 @@ recreate the container:
 
 ```bash
 docker tag cloudless-sky:previous cloudless-sky:latest
+docker tag cloudless-sync:previous cloudless-sync:latest
 docker compose -f compose.cloudless.yaml up -d
 ```
 
@@ -652,6 +755,8 @@ in them, and nowhere else.
 | `src/view/com/home/HomeHeaderLayoutMobile.tsx` | Takes an optional `showSeenToggle` and renders `HomeHeaderSeenToggle` in the slot that holds the feeds link, positioned just left of it. | 3.1 |
 | `src/view/com/posts/PostFeed.tsx` | The list's `renderItem` goes through `useSeenAnchorRenderItem()` (`src/features/cloudless/seen/SeenAnchorRow.tsx`), which wraps each Following post row in a `View` that registers its DOM node, so the show/hide toggle can keep the reader's place. Other feeds get `renderItem` unchanged (3.1). Each post row passes `metaAccessory={seenBadgeFor(slice)}` to `PostFeedItem`, where `seenBadgeFor` comes from `useSeenBadgeFor(feed)` (`src/features/cloudless/seen/SeenBadge.tsx`) and is in `renderItem`'s dependencies. It returns the "Seen" badge for units seen as of the snapshot, only in Following and only while seen posts are shown (3.2). | 3.1, 3.2 |
 | `src/view/com/posts/PostFeedItem.tsx` | `PostFeedItem` and `FeedItemInner` take an optional `metaAccessory` node. `PostMeta` is wrapped in `PostMetaRow` (`src/features/cloudless/seen/PostMetaRow.tsx`), which renders it unchanged without an accessory and otherwise lays it out in a row with the accessory after it, `PostMeta` keeping `flex: 1`. `PostMeta` itself is unchanged. | 3.2 |
+| `package.json` | Jest's `modulePathIgnorePatterns` gains `cloudless-sync/.*` (next to upstream's `bskylink/.*`), so the app's `pnpm test` leaves out the sync service's own `node:test` suites. | 4.1 |
+| `.oxlintrc.json` | `ignorePatterns` gains `cloudless-sync/**`. The sync service is a Node project with its own checks; the app's browser-oriented rules (such as `import/no-nodejs-modules`) don't apply to it, and the pre-commit hook would otherwise lint its staged files with them. | 4.1 |
 
 Fork-only files outside `src/features/cloudless/` (no upstream counterpart,
 so no content conflicts; an add/add conflict is possible only if upstream
@@ -660,8 +765,10 @@ creates a file at the same path):
 | File | Purpose | Story |
 | ---- | ------- | ----- |
 | `docs/cloudless-sky.md` | This guide | 1.1 |
-| `.dockerignore` | Keeps `.git`, `node_modules`, `.env*` files and generated build output out of the Docker build context | 1.3 |
-| `compose.cloudless.yaml` | The deployment: build arguments, runtime settings, restart policy and the loopback-only port | 1.4 |
+| `.dockerignore` | Keeps `.git`, `node_modules`, `.env*` files, generated build output and the sync service's local database out of the Docker build context | 1.3, 4.1 |
+| `compose.cloudless.yaml` | The deployment: build arguments, runtime settings, restart policies, loopback-only ports, and the sync service with its data volume | 1.4, 4.1 |
+| `cloudless-sync/` | The seen-list sync service, its own pnpm workspace (see its `README.md`) | 4.1 |
+| `Dockerfile.cloudless-sync` | The sync service's image, modeled on `Dockerfile.bskylink` | 4.1 |
 | `docs/backlog/epic-*-stories.md` | Planning documents for Epics 1–4 (if committed) | – |
 
 Upstream files deliberately left unchanged:

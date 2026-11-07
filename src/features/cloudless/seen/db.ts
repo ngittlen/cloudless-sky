@@ -6,6 +6,7 @@ import {
   SEEN_DB_VERSION,
   SEEN_LIST_LIMIT,
   SEEN_STORE,
+  type SeenMeta,
   type SeenRecord,
 } from './constants'
 
@@ -35,6 +36,16 @@ export interface SeenStorage {
     entries: SeenEntry[],
     opts?: {dirty?: 0 | 1},
   ): Promise<SeenWriteResult>
+  /**
+   * Up to `limit` records not yet sent to the sync service.
+   */
+  readDirty(did: string, limit: number): Promise<SeenEntry[]>
+  /**
+   * Marks records as sent, skipping any whose `seenAt` has changed since.
+   */
+  markSynced(did: string, entries: SeenEntry[]): Promise<void>
+  readMeta(did: string): Promise<SeenMeta | undefined>
+  writeMeta(meta: SeenMeta): Promise<void>
 }
 
 type IndexedDbGlobals = {
@@ -175,6 +186,10 @@ export async function loadSeen(
  * already stored, then drops the oldest records past
  * {@link SEEN_LIST_LIMIT}. Tabs that write at the same time are serialized by
  * IndexedDB, so the later `seenAt` wins whichever tab writes last.
+ *
+ * `dirty: 0` writes entries the sync service already holds. A stored record
+ * with a later `seenAt` keeps it and stays dirty, so it is still sent; one
+ * with the same `seenAt` is marked synced, since the service has it.
  */
 export async function writeSeen(
   db: IDBDatabase,
@@ -218,7 +233,14 @@ export async function writeSeen(
     const getReq = store.get([did, entry.uri])
     getReq.onsuccess = () => {
       const existing = getReq.result as unknown
-      if (!isValidRecord(existing) || existing.seenAt < entry.seenAt) {
+      if (
+        dirty === 0 &&
+        isValidRecord(existing) &&
+        existing.seenAt === entry.seenAt &&
+        existing.dirty !== 0
+      ) {
+        store.put({...existing, dirty: 0})
+      } else if (!isValidRecord(existing) || existing.seenAt < entry.seenAt) {
         const record: SeenRecord = {
           did,
           uri: entry.uri,
@@ -235,6 +257,92 @@ export async function writeSeen(
 
   await done
   return {written, evicted}
+}
+
+/**
+ * Up to `limit` records for `did` with `dirty = 1`, through the `did_dirty`
+ * index.
+ */
+export async function readDirtySeen(
+  db: IDBDatabase,
+  {IDBKeyRange}: IndexedDbGlobals,
+  did: string,
+  limit: number,
+): Promise<SeenEntry[]> {
+  const tx = db.transaction(SEEN_STORE, 'readonly')
+  const done = txDone(tx)
+  const req = tx
+    .objectStore(SEEN_STORE)
+    .index(SEEN_BY_DIRTY_INDEX)
+    .getAll(IDBKeyRange.bound([did, 1], [did, 1]), limit)
+  await done
+  const entries: SeenEntry[] = []
+  for (const value of req.result as unknown[]) {
+    if (isValidRecord(value)) {
+      entries.push({uri: value.uri, seenAt: value.seenAt})
+    }
+  }
+  return entries
+}
+
+/**
+ * Sets `dirty = 0` on the records the sync service has accepted. A record
+ * whose `seenAt` differs was seen again after it was read for sending, so it
+ * stays dirty and goes in a later batch.
+ */
+export async function markSeenSynced(
+  db: IDBDatabase,
+  did: string,
+  entries: SeenEntry[],
+): Promise<void> {
+  if (entries.length === 0) return
+  const tx = db.transaction(SEEN_STORE, 'readwrite')
+  const done = txDone(tx)
+  const store = tx.objectStore(SEEN_STORE)
+  for (const entry of entries) {
+    const getReq = store.get([did, entry.uri])
+    getReq.onsuccess = () => {
+      const existing = getReq.result as unknown
+      if (
+        isValidRecord(existing) &&
+        existing.seenAt === entry.seenAt &&
+        existing.dirty !== 0
+      ) {
+        store.put({...existing, dirty: 0})
+      }
+    }
+  }
+  await done
+}
+
+export async function readSeenMeta(
+  db: IDBDatabase,
+  did: string,
+): Promise<SeenMeta | undefined> {
+  const tx = db.transaction(META_STORE, 'readonly')
+  const done = txDone(tx)
+  const req = tx.objectStore(META_STORE).get(did)
+  await done
+  const value = req.result as Partial<SeenMeta> | undefined
+  if (!value || typeof value !== 'object' || value.did !== did) return undefined
+  return {
+    did,
+    lastSyncServerTime:
+      typeof value.lastSyncServerTime === 'number' &&
+      Number.isFinite(value.lastSyncServerTime)
+        ? value.lastSyncServerTime
+        : undefined,
+  }
+}
+
+export async function writeSeenMeta(
+  db: IDBDatabase,
+  meta: SeenMeta,
+): Promise<void> {
+  const tx = db.transaction(META_STORE, 'readwrite')
+  const done = txDone(tx)
+  tx.objectStore(META_STORE).put(meta)
+  await done
 }
 
 /**
@@ -280,5 +388,10 @@ export function createIndexedDbStorage(
       withDb(db =>
         writeSeen(db, globals, did, entries, {dirty: opts?.dirty, limit}),
       ),
+    readDirty: (did, max) => withDb(db => readDirtySeen(db, globals, did, max)),
+    markSynced: (did, entries) =>
+      withDb(db => markSeenSynced(db, did, entries)),
+    readMeta: did => withDb(db => readSeenMeta(db, did)),
+    writeMeta: meta => withDb(db => writeSeenMeta(db, meta)),
   }
 }

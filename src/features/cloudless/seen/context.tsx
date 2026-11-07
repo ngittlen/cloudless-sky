@@ -10,6 +10,7 @@ import {
 
 import {type FeedTunerFn} from '#/lib/api/feed-manip'
 import {useSession} from '#/state/session'
+import {startSeenSync} from '#/features/cloudless/sync'
 import {SeenAnchorRows} from './anchor'
 import {
   getHideSeen,
@@ -53,8 +54,9 @@ const SeenFeedContext = createContext<SeenFeedContextValue>({
 SeenFeedContext.displayName = 'SeenFeedContext'
 
 /**
- * Provides the Following feed's hiding state to Home, and starts loading the
- * account's seen list so the first feed request does not wait long for it.
+ * Provides the Following feed's hiding state to Home, starts loading the
+ * account's seen list so the first feed request does not wait long for it,
+ * and syncs that list with the sync service while the account is active.
  */
 export function SeenFeedProvider({children}: {children: React.ReactNode}) {
   const {currentAccount} = useSession()
@@ -83,6 +85,7 @@ export function SeenFeedProvider({children}: {children: React.ReactNode}) {
     const lists = getSeenLists()
     lists.retainOnly(did)
     lists.get(did)
+    return startSeenSync(did)
   }, [did])
 
   return (

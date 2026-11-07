@@ -1,0 +1,3 @@
+# Its own pnpm workspace, apart from the app's, so the app's install, checks
+# and lockfile never include the service.
+packages: []

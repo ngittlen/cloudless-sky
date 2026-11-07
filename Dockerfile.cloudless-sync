@@ -1,0 +1,50 @@
+# Cloudless Sky seen-list sync service (Story 4.1). Modeled on
+# Dockerfile.bskylink. Deployed by compose.cloudless.yaml; see "Deploying and
+# updating" in docs/cloudless-sky.md.
+#
+# The service uses Node's built-in node:sqlite, so nothing is compiled
+# natively and the image builds the same on arm64 and amd64.
+FROM node:24.22-alpine3.23 AS build
+
+WORKDIR /app
+
+RUN corepack enable
+
+COPY ./cloudless-sync/package.json ./cloudless-sync/pnpm-lock.yaml ./cloudless-sync/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY ./cloudless-sync/tsconfig.json ./cloudless-sync/tsconfig.build.json ./
+COPY ./cloudless-sync/src ./src
+
+# build then prune dev deps
+RUN pnpm build
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts --prefer-offline
+
+FROM node:24.22-alpine3.23
+
+RUN apk add --update dumb-init
+
+# Avoid zombie processes, handle signal forwarding
+ENTRYPOINT ["dumb-init", "--"]
+
+WORKDIR /app
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+# A new named volume starts as a copy of this directory, owned by `node`.
+RUN mkdir /app/data && chown node /app/data
+
+VOLUME /app/data
+EXPOSE 8101
+# Listens on every interface inside the container, which Docker's port
+# publishing needs; compose.cloudless.yaml publishes it on the host's
+# loopback only.
+ENV CLOUDLESS_SYNC_HOST=0.0.0.0
+ENV CLOUDLESS_SYNC_PORT=8101
+ENV CLOUDLESS_SYNC_DB=/app/data/seen.sqlite
+ENV NODE_ENV=production
+
+USER node
+CMD ["node", "--enable-source-maps", "dist/bin.js"]
+
+LABEL org.opencontainers.image.description="Cloudless Sky seen-list sync service"

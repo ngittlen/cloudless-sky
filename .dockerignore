@@ -34,3 +34,6 @@ bskyweb/embedr-static/post-*.js
 bskyweb/embedr-static/post-*.css
 bskyweb/embedr-static/index-*.js
 bskyweb/embedr-static/polyfills-*.js
+
+# Cloudless Sky: the sync service's local dev database.
+cloudless-sync/data
