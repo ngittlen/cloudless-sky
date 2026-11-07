@@ -7,3 +7,4 @@ must hook in, and each such file is listed in
 
 - `appName.ts`: the product name used in page titles.
 - `metrics.ts`: turns off usage metrics unless a metrics host is configured.
+- `safeArea.ts`: keeps the web bottom bar clear of the iPhone home indicator.

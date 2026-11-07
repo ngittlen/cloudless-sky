@@ -46,6 +46,7 @@ import {
 import {Text} from '#/components/Typography'
 import {useAgeAssurance} from '#/ageAssurance'
 import {useAnalytics} from '#/analytics'
+import {useWebBottomBarSafeAreaStyle} from '#/features/cloudless/safeArea'
 import {isFollowingV2HomeDotEnabled} from '#/features/followingV2/eligibility'
 import {styles} from './BottomBarStyles'
 
@@ -70,6 +71,7 @@ export function BottomBarWeb() {
   const ax = useAnalytics()
   const aa = useAgeAssurance()
   const isLabeler = profile?.associated?.labeler
+  const safeAreaStyle = useWebBottomBarSafeAreaStyle()
 
   const showSignIn = useCallback(() => {
     closeAllActiveElements()
@@ -100,6 +102,7 @@ export function BottomBarWeb() {
             ? {borderColor: t.atoms.bg.backgroundColor}
             : t.atoms.border_contrast_low,
           footerMinimalShellTransform,
+          safeAreaStyle,
         ]}
         onLayout={event => footerHeight.set(event.nativeEvent.layout.height)}>
         {hasSession ? (

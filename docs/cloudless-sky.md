@@ -108,6 +108,9 @@ conflicts.
    match [Upstream files the fork changes](#upstream-files-the-fork-changes)
    exactly. Lines marked `A` are fork-only files.
 
+6. Push to `origin` and redeploy (see
+   [Updating to a new version](#updating-to-a-new-version)).
+
 ## Running locally
 
 The dev server runs the app from source with hot reload. Every later story is
@@ -337,7 +340,8 @@ docker run --rm --name cloudless-sky \
 
 Then open <http://localhost:8100>. The image's default command runs
 `bskyweb` with no subcommand, which prints its help and exits, so the run
-command must end in `/usr/bin/bskyweb serve`.
+command must end in `/usr/bin/bskyweb serve`. The deployment runs the same
+settings from a Compose file (see [Deploying and updating](#deploying-and-updating)).
 
 ### Runtime settings
 
@@ -410,6 +414,218 @@ ATP_APPVIEW_HOST=https://public.api.bsky.app HTTP_ADDRESS=127.0.0.1:8100 \
 
 The build output and the binary are gitignored.
 
+## Deploying and updating
+
+Cloudless Sky runs on its own OrbStack Linux machine (VM) named
+`cloudless-sky` on the M4 Mac. The machine runs Docker Engine and Tailscale.
+It joins the tailnet as the device `cloudless-sky`, and Tailscale Serve
+publishes the app at `https://cloudless-sky.<tailnet>.ts.net` (for this
+tailnet, `https://cloudless-sky.tail8e6d2.ts.net`). Only devices on the
+tailnet can reach it.
+
+```
+iPhone / Mac (on the tailnet)
+  └─ https://cloudless-sky.<tailnet>.ts.net        (Tailscale cert)
+       └─ tailscale serve on the cloudless-sky VM
+            └─ http://127.0.0.1:8100                 (published on loopback only)
+                 └─ container "web": bskyweb serve   (restart: unless-stopped)
+```
+
+The container's settings live in `compose.cloudless.yaml` at the repo root:
+the build arguments and runtime settings from
+[Building and running the container](#building-and-running-the-container),
+the `restart: unless-stopped` policy, and a port binding to `127.0.0.1` only,
+so nothing on the network reaches the container directly and tailnet devices
+come in through Tailscale Serve. OrbStack also forwards the VM's ports to
+`localhost` on the Mac itself, so `http://localhost:8100` works on that Mac.
+That is local to the Mac, not a network exposure. Keep OrbStack's option to
+expose machine ports to the LAN off. Don't run another server on port 8100 in
+the dev VM at the same time, or the Mac's `localhost:8100` may reach the wrong
+one.
+
+### One-time setup
+
+**1. On the Mac: OrbStack settings.**
+
+- **Settings → General → Start at login**: on, so OrbStack and its machines
+  come back after the Mac restarts and someone logs in. OrbStack runs in a
+  user session, so nothing starts until a user logs in. With FileVault on,
+  macOS can't log in automatically, so after a power cut or an unattended
+  update the app stays down until you log in on the Mac. Automatic login
+  (System Settings → Users & Groups) closes that gap but requires turning
+  FileVault off; that trade-off is yours to make.
+- **Settings → System → Memory limit**: OrbStack machines share one memory
+  limit; there is no per-machine setting. The image build needs about 8 GB on
+  top of whatever else is running (other machines, containers), so set the
+  limit to at least 12 GB.
+
+**2. In the Tailscale admin console** (<https://login.tailscale.com/admin/dns>):
+MagicDNS and HTTPS Certificates must both be on. This tailnet already has them
+(the dev VM has a certificate domain), so this is a check, not a change.
+
+**3. On the Mac: create the machine.**
+
+```bash
+orb create ubuntu:noble cloudless-sky
+orb -m cloudless-sky          # opens a shell in it (or: ssh cloudless-sky@orb)
+```
+
+The machine uses the Mac's architecture (arm64), and its hostname is
+`cloudless-sky`. Run all of the following inside that shell.
+
+**4. Install Docker Engine and start it at boot.**
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo systemctl enable --now docker.service containerd.service
+sudo usermod -aG docker "$USER"
+exit
+```
+
+Reopen the shell (`orb -m cloudless-sky`) so the `docker` group applies, then
+check:
+
+```bash
+docker run --rm hello-world
+docker compose version
+```
+
+**5. Install Tailscale and join the tailnet as `cloudless-sky`.**
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo systemctl enable --now tailscaled
+sudo tailscale up --hostname=cloudless-sky
+```
+
+Open the login URL it prints and approve the device. Then, in the admin
+console's **Machines** page, open `cloudless-sky` and choose **Disable key
+expiry**, so the server doesn't drop off the tailnet when its node key
+expires (180 days by default).
+
+**6. Get the code, build and start.** `git clone` checks out `origin`'s
+default branch (`main`), so first merge the fork's work into `main` and push
+it to `origin`. The clone must contain `compose.cloudless.yaml`.
+
+```bash
+git clone https://github.com/ngittlen/cloudless-sky.git ~/cloudless-sky
+cd ~/cloudless-sky
+docker compose -f compose.cloudless.yaml config --quiet   # checks the file
+CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
+  docker compose -f compose.cloudless.yaml up -d --build
+```
+
+The first build takes several minutes (see the memory notes in
+[Build](#build)). Check that the server answers:
+
+```bash
+curl -fsS http://127.0.0.1:8100/robots.txt
+docker compose -f compose.cloudless.yaml ps
+```
+
+**7. Publish it on the tailnet over HTTPS.**
+
+```bash
+sudo tailscale serve --bg 8100
+tailscale serve status
+```
+
+`--bg` stores the Serve configuration in `tailscaled`, so it survives
+restarts. It proxies `https://cloudless-sky.<tailnet>.ts.net` to
+`http://127.0.0.1:8100` with a certificate Tailscale issues automatically.
+The first HTTPS request can take a few seconds while the certificate is
+issued. This is Tailscale **Serve** (tailnet only), not Funnel: nothing is
+exposed to the public internet.
+
+### Checking the deployment
+
+- **From a device on the tailnet**, open
+  `https://cloudless-sky.<tailnet>.ts.net`: no certificate warning, and the
+  tab title reads "Home — Cloudless Sky".
+- **From a device not on the tailnet** (for example the iPhone with
+  Tailscale turned off, on cellular), the address doesn't load: the
+  `ts.net` name only resolves to a tailnet address, which is unreachable
+  from outside.
+- **VM restart:** on the Mac, run `orb restart cloudless-sky`, wait a minute,
+  then load the address again. Docker starts at boot, `restart:
+  unless-stopped` starts the container, and `tailscaled` restores the Serve
+  configuration.
+- **Mac restart:** restart the Mac and log in (see the FileVault note in
+  step 1). OrbStack starts at login and starts the machine with it. If the app isn't back within a few minutes,
+  check `orb list` on the Mac: if `cloudless-sky` is stopped, start it with
+  `orb start cloudless-sky` and report it, because then OrbStack isn't
+  restoring the machine at login on this setup.
+
+Inside the VM, useful commands:
+
+```bash
+cd ~/cloudless-sky
+docker compose -f compose.cloudless.yaml ps        # status
+docker compose -f compose.cloudless.yaml logs -f   # server logs
+tailscale serve status                             # what Serve publishes
+```
+
+### Adding it to the iPhone home screen
+
+1. Install the Tailscale app on the iPhone, sign in to the same tailnet and
+   connect.
+2. In Safari, open `https://cloudless-sky.<tailnet>.ts.net`.
+3. Tap **Share → Add to Home Screen**. The name is already "Cloudless Sky"
+   (from the `apple-mobile-web-app-title` tag). If iOS shows an **Open as Web
+   App** switch, leave it on. Tap **Add**.
+4. Open it from the home screen. It opens full-screen without Safari's address
+   bar (from the `apple-mobile-web-app-capable` tag). Sign in with an app
+   password (see [Signing in](#signing-in)). The bottom tab bar sits above
+   the home indicator (the swipe-up bar), and the header sits below the
+   status bar.
+5. Close the app from the app switcher and reopen it: you are still signed
+   in.
+
+iOS keeps a home-screen web app's storage separate from Safari's, so signing
+in (and anything else stored in the browser) in one doesn't carry over to the
+other. Safari can clear storage for sites you haven't visited in a while;
+home-screen web apps are exempt. Prefer the home-screen app.
+
+Tailscale must be connected on the iPhone for the app to load.
+
+### Updating to a new version
+
+After merging upstream changes or fork changes into `main` and pushing to
+`origin` (see [Bringing in upstream changes](#bringing-in-upstream-changes)),
+in the VM:
+
+```bash
+cd ~/cloudless-sky
+git checkout main
+git pull --ff-only
+docker tag cloudless-sky:latest cloudless-sky:previous
+CLOUDLESS_COMMIT=$(git rev-parse --short HEAD) \
+  docker compose -f compose.cloudless.yaml up -d --build
+docker image prune -f
+curl -fsS http://127.0.0.1:8100/robots.txt
+```
+
+The old container keeps serving while the new image builds; Compose then
+replaces it, so the app is down for only a few seconds. The `previous` tag
+keeps the last working image. `docker image prune -f` removes only untagged
+images, which leaves `latest` and `previous` in place. Every few months,
+`docker builder prune -f` frees the build cache.
+
+To roll back without rebuilding, point `latest` at the previous image and
+recreate the container:
+
+```bash
+docker tag cloudless-sky:previous cloudless-sky:latest
+docker compose -f compose.cloudless.yaml up -d
+```
+
+Without `--build`, Compose uses the existing `cloudless-sky:latest` image.
+The checkout stays on `main`, so the next update works as usual; fix forward
+on `main` (or revert the bad commit) before updating again.
+
+The home-screen app picks up the new version on its next full load. If it
+looks stale, close it from the app switcher and reopen it.
+
 ## Upstream files the fork changes
 
 These are the only upstream files Cloudless Sky changes. Expect merge conflicts
@@ -419,11 +635,12 @@ in them, and nowhere else.
 | ---- | ------ | ----- |
 | `src/lib/strings/headings.ts` | `bskyTitle()` appends `APP_NAME` from `src/features/cloudless/appName.ts` ("Cloudless Sky") in place of the literal "Bluesky". Every page title goes through this function. | 1.1 |
 | `src/lib/hooks/__tests__/useSetPostTitle.test.tsx` | The expected titles end in "— Cloudless Sky". | 1.1 |
-| `bskyweb/templates/base.html` | The default `<title>` and `application-name` say "Cloudless Sky", and an `apple-mobile-web-app-title` meta tag labels the home-screen icon "Cloudless Sky". | 1.1 |
+| `bskyweb/templates/base.html` | The default `<title>` and `application-name` say "Cloudless Sky", and an `apple-mobile-web-app-title` meta tag labels the home-screen icon "Cloudless Sky" (1.1). `apple-mobile-web-app-capable` and `mobile-web-app-capable` meta tags make the home-screen app open full-screen (1.4). | 1.1, 1.4 |
 | `bskyweb/templates/home.html` | The server-rendered title of `/` says "Cloudless Sky". It shows until the app's JavaScript sets the page title. | 1.1 |
 | `bskyweb/templates/error.html` | Server error pages are titled `Error {{ statusCode }} - Cloudless Sky`. | 1.1 |
 | `Dockerfile` | The Go stage builds for Docker's `TARGETARCH` (`ARG TARGETARCH`, `ENV GOARCH=$TARGETARCH`) in place of a hardcoded `amd64`. | 1.3 |
 | `src/analytics/metrics/index.ts` | The shared metrics client is wrapped in `applyMetricsPolicy()` from `src/features/cloudless/metrics.ts`, which turns off usage metrics unless `EXPO_PUBLIC_METRICS_API_HOST` is set. | 1.3 |
+| `src/view/shell/bottom-bar/BottomBarWeb.tsx` | The web bottom bar adds the bottom safe-area inset as padding (`useWebBottomBarSafeAreaStyle()` from `src/features/cloudless/safeArea.ts`), so it clears the iPhone home indicator in the full-screen home-screen app. | 1.4 |
 
 Fork-only files outside `src/features/cloudless/` (no upstream counterpart,
 so no content conflicts; an add/add conflict is possible only if upstream
@@ -433,6 +650,8 @@ creates a file at the same path):
 | ---- | ------- | ----- |
 | `docs/cloudless-sky.md` | This guide | 1.1 |
 | `.dockerignore` | Keeps `.git`, `node_modules`, `.env*` files and generated build output out of the Docker build context | 1.3 |
+| `compose.cloudless.yaml` | The deployment: build arguments, runtime settings, restart policy and the loopback-only port | 1.4 |
+| `docs/backlog/epic-*-stories.md` | Planning documents for Epics 1–4 (if committed) | – |
 
 Upstream files deliberately left unchanged:
 
