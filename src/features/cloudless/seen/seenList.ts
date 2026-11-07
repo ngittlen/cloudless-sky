@@ -444,7 +444,10 @@ export class SeenListRegistry {
 function createChannel(): SeenChannel | null {
   try {
     if (typeof BroadcastChannel !== 'undefined') {
-      return new BroadcastChannel(SEEN_CHANNEL_NAME) as SeenChannel
+      const channel = new BroadcastChannel(SEEN_CHANNEL_NAME)
+      // Node (unit tests) would otherwise keep the process alive.
+      ;(channel as {unref?: () => void}).unref?.()
+      return channel as SeenChannel
     }
   } catch {}
   return null

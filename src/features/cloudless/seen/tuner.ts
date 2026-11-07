@@ -1,11 +1,9 @@
-import {useMemo} from 'react'
-
-import {type FeedTunerFn} from '#/lib/api/feed-manip'
-import {useSeenFeed} from './context'
+import {type FeedTunerFn, type FeedViewPostsSlice} from '#/lib/api/feed-manip'
 import {getSeenSnapshotTime} from './feedState'
+import {isBeforeLookBack} from './lookBack'
 import {getSeenLists, type SeenList, type SeenListRegistry} from './seenList'
 
-type SliceLike = {items: {post: {uri: string}}[]}
+type SliceLike = Pick<FeedViewPostsSlice, 'items'>
 
 const hideSeenTuners = new WeakSet<FeedTunerFn>()
 
@@ -25,7 +23,10 @@ export function isSliceSeenAsOf(
 }
 
 /**
- * A Following tuner that drops units seen as of the snapshot time.
+ * A Following tuner that drops units seen as of the snapshot time, and units
+ * that entered the timeline before the look-back limit (the moment the
+ * oldest entry known at the snapshot was seen). The second rule covers pages
+ * loaded while seen posts were shown.
  *
  * It reads the snapshot time when it runs rather than when it is made: the
  * feed's query sets the snapshot just before it returns the first page, and
@@ -42,7 +43,13 @@ export function createHideSeenTuner(
     const asOf = getSeenSnapshotTime(did) ?? snapshotTime
     if (asOf === undefined) return slices
     const list = lists.get(did)
-    return slices.filter(slice => !isSliceSeenAsOf(slice, list, asOf))
+    const lookBack = list.oldestSeenAt(asOf)
+    return slices.filter(
+      slice =>
+        !isSliceSeenAsOf(slice, list, asOf) &&
+        (lookBack === undefined ||
+          !isBeforeLookBack(slice._feedPost, lookBack)),
+    )
   }
   hideSeenTuners.add(tuner)
   return tuner
@@ -53,19 +60,4 @@ export function createHideSeenTuner(
  */
 export function isHideSeenTuner(fn: FeedTunerFn): boolean {
   return hideSeenTuners.has(fn)
-}
-
-/**
- * The hiding tuner for Following, or `undefined` when hiding is off. Its
- * identity changes only with the account, the snapshot time and the
- * `hideSeen` flag, and a new identity makes the feed re-tune its loaded
- * pages.
- */
-export function useHideSeenTuner(): FeedTunerFn | undefined {
-  const {did, snapshotTime, hideSeen} = useSeenFeed()
-  return useMemo(
-    () =>
-      did && hideSeen ? createHideSeenTuner(did, snapshotTime) : undefined,
-    [did, hideSeen, snapshotTime],
-  )
 }

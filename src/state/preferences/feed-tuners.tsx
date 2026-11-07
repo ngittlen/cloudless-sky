@@ -1,7 +1,7 @@
 import {useMemo} from 'react'
 
 import {FeedTuner} from '#/lib/api/feed-manip'
-import {useHideSeenTuner} from '#/features/cloudless/seen/tuner'
+import {useHideSeenTuner} from '#/features/cloudless/seen/context'
 import {type FeedDescriptor} from '../queries/post-feed'
 import {usePreferencesQuery} from '../queries/preferences'
 import {useSession} from '../session'

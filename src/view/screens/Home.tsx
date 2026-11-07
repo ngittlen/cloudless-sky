@@ -40,8 +40,6 @@ import {
   type RenderTabBarFnProps,
 } from '#/view/com/pager/Pager'
 import {CustomFeedEmptyState} from '#/view/com/posts/CustomFeedEmptyState'
-import {FollowingEmptyState} from '#/view/com/posts/FollowingEmptyState'
-import {FollowingEndOfFeed} from '#/view/com/posts/FollowingEndOfFeed'
 import {
   HomeHeaderModeProvider,
   useHomeHeaderMode,
@@ -50,6 +48,10 @@ import {NoFeedsPinned} from '#/screens/Home/NoFeedsPinned'
 import * as Layout from '#/components/Layout'
 import {useAnalytics} from '#/analytics'
 import {IS_NATIVE, IS_WEB} from '#/env'
+import {
+  FollowingEmptyStateOrCaughtUp,
+  renderFollowingEndOfFeed,
+} from '#/features/cloudless/seen/CaughtUp'
 import {SeenFeedProvider} from '#/features/cloudless/seen/context'
 import {useDemoMode} from '#/storage/hooks/demo-mode'
 
@@ -258,7 +260,7 @@ function HomeScreenReady({
   )
 
   const renderFollowingEmptyState = useCallback(() => {
-    return <FollowingEmptyState />
+    return <FollowingEmptyStateOrCaughtUp />
   }, [])
 
   const renderCustomFeedEmptyState = useCallback(() => {
@@ -326,7 +328,7 @@ function HomeScreenReady({
                 feed={feed}
                 feedParams={homeFeedParams}
                 renderEmptyState={renderFollowingEmptyState}
-                renderEndOfFeed={FollowingEndOfFeed}
+                renderEndOfFeed={renderFollowingEndOfFeed}
                 feedInfo={feedInfo}
               />
             )

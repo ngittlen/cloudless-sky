@@ -1,5 +1,12 @@
-import {createContext, useContext, useEffect, useSyncExternalStore} from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from 'react'
 
+import {type FeedTunerFn} from '#/lib/api/feed-manip'
 import {useSession} from '#/state/session'
 import {
   getHideSeen,
@@ -7,6 +14,7 @@ import {
   subscribeToSeenFeedState,
 } from './feedState'
 import {getSeenLists} from './seenList'
+import {createHideSeenTuner} from './tuner'
 
 export type SeenFeedContextValue = {
   /**
@@ -63,4 +71,19 @@ export function SeenFeedProvider({children}: {children: React.ReactNode}) {
 
 export function useSeenFeed(): SeenFeedContextValue {
   return useContext(SeenFeedContext)
+}
+
+/**
+ * The hiding tuner for Following, or `undefined` when hiding is off. Its
+ * identity changes only with the account, the snapshot time and the
+ * `hideSeen` flag, and a new identity makes the feed re-tune its loaded
+ * pages.
+ */
+export function useHideSeenTuner(): FeedTunerFn | undefined {
+  const {did, snapshotTime, hideSeen} = useSeenFeed()
+  return useMemo(
+    () =>
+      did && hideSeen ? createHideSeenTuner(did, snapshotTime) : undefined,
+    [did, hideSeen, snapshotTime],
+  )
 }

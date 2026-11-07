@@ -206,7 +206,7 @@ function fakeApi(
   return {
     peekLatest: jest.fn(() => Promise.resolve(latest!)),
     fetch: jest.fn(() =>
-      Promise.resolve({cursor: 'next', feed: [single('x')]}),
+      Promise.resolve({cursor: undefined, feed: [single('x')]}),
     ),
   }
 }
@@ -214,12 +214,10 @@ function fakeApi(
 describe('SeenFilteringFeedAPI', () => {
   it('sets the snapshot once the first page arrives', async () => {
     const {registry} = createList()
-    const api = new SeenFilteringFeedAPI(
-      fakeApi(undefined),
-      ME,
-      registry,
-      () => 5_000,
-    )
+    const api = new SeenFilteringFeedAPI(fakeApi(undefined), ME, {
+      lists: registry,
+      now: () => 5_000,
+    })
 
     const res = await api.fetch({cursor: undefined, limit: 30})
 
@@ -230,12 +228,10 @@ describe('SeenFilteringFeedAPI', () => {
   it('leaves the snapshot alone for later pages', async () => {
     const {registry} = createList()
     setSeenSnapshotTime(ME, 4_000)
-    const api = new SeenFilteringFeedAPI(
-      fakeApi(undefined),
-      ME,
-      registry,
-      () => 5_000,
-    )
+    const api = new SeenFilteringFeedAPI(fakeApi(undefined), ME, {
+      lists: registry,
+      now: () => 5_000,
+    })
 
     await api.fetch({cursor: 'next', limit: 30})
 
@@ -245,7 +241,9 @@ describe('SeenFilteringFeedAPI', () => {
   it('keeps every fetched post, seen or not', async () => {
     const {registry, list} = createList()
     list.add([uri('x')], clock)
-    const api = new SeenFilteringFeedAPI(fakeApi(undefined), ME, registry)
+    const api = new SeenFilteringFeedAPI(fakeApi(undefined), ME, {
+      lists: registry,
+    })
 
     const res = await api.fetch({cursor: undefined, limit: 30})
 
@@ -273,7 +271,9 @@ describe('SeenFilteringFeedAPI', () => {
 
     it('reports nothing new when the newest post is seen', async () => {
       const {registry, list} = createList()
-      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, registry)
+      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, {
+        lists: registry,
+      })
       // Seen after the snapshot, so a dry-run tune alone would keep it.
       setSeenSnapshotTime(ME, 500)
       list.add([uri('new')], clock)
@@ -283,14 +283,18 @@ describe('SeenFilteringFeedAPI', () => {
 
     it('reports a new post when the newest post is unseen', async () => {
       const {registry} = createList()
-      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, registry)
+      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, {
+        lists: registry,
+      })
 
       expect(await pollLatest(page(api, registry))).toBe(true)
     })
 
     it('reports a seen post as new while seen posts are shown', async () => {
       const {registry, list} = createList()
-      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, registry)
+      const api = new SeenFilteringFeedAPI(fakeApi(single('new')), ME, {
+        lists: registry,
+      })
       list.add([uri('new')], clock)
       setHideSeen(false)
 

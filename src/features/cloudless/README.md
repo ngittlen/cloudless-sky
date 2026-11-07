@@ -34,14 +34,29 @@ must hook in, and each such file is listed in
     fetches its first page (open or refresh), so posts seen while scrolling
     stay on screen until the next refresh.
   - `context.tsx`: `SeenFeedProvider`, mounted around legacy Home, exposes
-    `{did, snapshotTime, hideSeen}`. Without it, nothing is hidden.
+    `{did, snapshotTime, hideSeen}`, and `useHideSeenTuner()` builds the
+    tuner from it. Without the provider, nothing is hidden.
   - `tuner.ts`: the Following feed tuner. It drops a unit when its last item
     (the newest post: the reply in a reply unit, the original in a repost)
-    is seen as of the snapshot. Fetched pages keep every post; hiding happens
+    is seen as of the snapshot, or when the unit entered the timeline before
+    the look-back limit. Fetched pages keep every post; hiding happens
     only when the query tunes them, so seen posts can be shown again in place.
   - `SeenFilteringFeedAPI.ts`: wraps the Following feed API. It waits for the
     seen list before the first page, sets the snapshot time when that page
     arrives, and answers the "new posts" check with nothing when the newest
-    post is already seen.
+    post is already seen. While seen posts are hidden, each `fetch()` asks for
+    100 posts at a time and keeps going (up to 10 requests) until it has a
+    post the feed would show that is not seen, so a long run of seen posts
+    does not stall the feed. It ends the feed at the look-back limit by
+    returning no cursor, and keeps the real cursor in `savedCursor`. It never
+    drops posts from what it returns, except Discover posts after Home's
+    fallback marker.
+  - `lookBack.ts`: a feed item's timeline time (repost time for reposts) for
+    the look-back limit. The limit is the earliest `seenAt` among entries
+    known at the snapshot, so the first session on an empty list has no
+    limit, and the limit moves forward as the list rolls past 100,000.
+  - `CaughtUp.tsx`: "You're all caught up", shown in place of Following's
+    official empty and end-of-feed messages while seen posts are hidden and
+    the account has seen something.
   - `home.ts`: pins Home to the legacy version, which these hooks use.
   - `testing/fakeIndexedDb.ts`: a small in-memory IndexedDB for unit tests.
