@@ -79,6 +79,34 @@ the first blank line) name the conflicted files, followed by `CONFLICT`
 messages. The exit status is `0` for a clean merge and `1` when there are
 conflicts.
 
+### Nightly sync pull request
+
+The workflow `.github/workflows/cloudless-upstream-sync.yml` runs every night
+at 04:00 UTC, after upstream's own nightly jobs, and can also be started by hand
+from the Actions tab. When upstream's `main` has commits the fork's `main`
+lacks, it pushes upstream's `main` to the `upstream-sync` branch and opens a
+pull request into `main`, or updates the one already open. The description
+lists the incoming commits, whether GitHub can merge them without conflicts,
+and which [upstream files the fork changes](#upstream-files-the-fork-changes)
+upstream touched.
+
+- **Merge it with "Create a merge commit"**, never squash or rebase. Only a
+  merge commit records that upstream's commits are in `main`; otherwise the
+  next sync brings them in again and conflicts.
+- **When it has conflicts**, merge locally as above (`git merge upstream/main`
+  or `git merge origin/upstream-sync`), push `main`, and the pull request
+  closes as merged.
+- Either way, go through [After the merge](#after-the-merge) before
+  redeploying.
+
+The workflow needs a repository secret named `UPSTREAM_SYNC_TOKEN`: a
+fine-grained personal access token limited to this repository, with
+**Contents**, **Pull requests** and **Workflows** set to read and write. The
+built-in `GITHUB_TOKEN` can't push commits that change files under
+`.github/workflows`, and upstream changes them often. The repository's Actions
+setting "Allow GitHub Actions to create and approve pull requests" is not
+needed, because the token is a personal one.
+
 ### After the merge
 
 1. Set up the toolchain and dependencies with the commands in
