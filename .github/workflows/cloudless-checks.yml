@@ -1,0 +1,117 @@
+name: Cloudless checks
+
+# Checks for the fork's own parts that upstream's workflows don't cover: the
+# seen-list sync service, the app's sync integration test against it, and the
+# two production images the cloudless-sky VM builds.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-service:
+    name: Sync service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudless-sync
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cloudless-sync/package.json
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+          cache-dependency-path: cloudless-sync/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  sync-integration:
+    name: App sync against the service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            cloudless-sync/pnpm-lock.yaml
+      - name: Install the app
+        run: pnpm install --frozen-lockfile
+      # The integration test skips itself unless the service's dependencies
+      # are installed, which is why upstream's test job never runs it.
+      - name: Install the service
+        run: pnpm --dir cloudless-sync install --frozen-lockfile
+      - name: Compile translations
+        run: pnpm intl:build
+      - name: Run the integration test
+        run: |
+          set -o pipefail
+          pnpm test --verbose src/features/cloudless/sync/__tests__/integration.test.ts 2>&1 \
+            | tee "$RUNNER_TEMP/jest.log"
+          if grep -q "skips the service integration test" "$RUNNER_TEMP/jest.log"; then
+            echo "::error::The integration test was skipped"
+            exit 1
+          fi
+
+  images:
+    name: Production images (arm64)
+    # The cloudless-sky VM runs on an arm64 Mac, so the images build on arm64
+    # here too.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the Compose file
+        run: docker compose -f compose.cloudless.yaml config --quiet
+      - name: Build the web and sync images
+        env:
+          GITHUB_SHA_FULL: ${{ github.sha }}
+        run: CLOUDLESS_COMMIT="${GITHUB_SHA_FULL:0:9}" docker compose -f compose.cloudless.yaml build
+      - name: Start both and check they answer
+        run: |
+          docker compose -f compose.cloudless.yaml up -d
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8100/robots.txt >/dev/null \
+              && curl -fsS http://127.0.0.1:8101/sync/health; then
+              echo
+              echo "Both servers answer."
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose.cloudless.yaml logs
+          exit 1
+      - name: Stop
+        if: always()
+        run: docker compose -f compose.cloudless.yaml down

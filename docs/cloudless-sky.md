@@ -272,6 +272,26 @@ pnpm install
 pnpm typecheck && pnpm test && pnpm build
 ```
 
+### Checks on GitHub
+
+Every pull request and every push to `main` runs these workflows:
+
+| Workflow | Checks |
+| -------- | ------ |
+| **Lint** (upstream) | Lint, translations, Prettier, lexicons, typecheck (iOS, Android, web), and the Jest tests in four shards |
+| **golang** (upstream) | `bskyweb`: `make check`, build and tests |
+| **Lockfile** (upstream) | `pnpm-lock.yaml` matches `package.json` (pull requests only) |
+| **PR Tests** (upstream) | Web bundle size against `main`, browser support, and the native fingerprint (about 9 minutes) |
+| **Workflow security** (upstream) | zizmor audit of the workflow files (only when `.github/` changes) |
+| **Cloudless checks** (`.github/workflows/cloudless-checks.yml`) | The sync service's typecheck, tests and build; the app's sync integration test against a running service, which Lint's tests skip; and both production images built on arm64, started, and answering on 8100 and 8101 |
+
+Every other upstream workflow is turned off in the repository's Actions
+settings (`gh workflow disable`), because they deploy to Bluesky's
+infrastructure or need its secrets. That setting lives on GitHub, not in the
+files, so upstream changes to those workflows merge without conflicts. A
+workflow file that upstream adds starts out enabled. If it fails for lack of
+Bluesky's secrets, turn it off with `gh workflow disable "<name>"`.
+
 ### Baseline check results
 
 Results on untouched upstream `cb5888730`, with Node 24.22.1 and pnpm
