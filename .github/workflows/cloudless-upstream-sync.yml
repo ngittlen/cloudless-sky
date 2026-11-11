@@ -1,0 +1,125 @@
+name: Cloudless upstream sync
+
+# Opens (or updates) a pull request that brings bluesky-social/social-app's
+# main into the fork's main. The pull request's branch, upstream-sync, is an
+# exact copy of upstream's main; merging it with a merge commit is the merge
+# described in docs/cloudless-sky.md ("Bringing in upstream changes").
+#
+# Runs after upstream's own nightly jobs (2 AM UTC), so each night's PR
+# includes them.
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudless-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Open upstream sync PR
+    runs-on: ubuntu-latest
+    if: github.repository == 'ngittlen/cloudless-sky'
+    env:
+      UPSTREAM_URL: https://github.com/bluesky-social/social-app.git
+      SYNC_BRANCH: upstream-sync
+      BASE_BRANCH: main
+    steps:
+      # The GITHUB_TOKEN cannot push commits that change files under
+      # .github/workflows, and upstream changes them often, so pushes and the
+      # pull request use a fine-grained token with Contents, Pull requests and
+      # Workflows write access to this repository only.
+      - name: Check out the fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Fetch upstream main
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" main
+          echo "UPSTREAM_SHA=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" "origin/$BASE_BRANCH"; then
+            echo "The fork's main already contains upstream main."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the sync branch
+        if: steps.check.outputs.new == 'true'
+        run: |
+          # The branch only ever holds upstream's main, so overwriting it
+          # loses nothing of the fork's.
+          git push --force origin "$UPSTREAM_SHA:refs/heads/$SYNC_BRANCH"
+
+      - name: Write the pull request description
+        if: steps.check.outputs.new == 'true'
+        run: |
+          base="origin/$BASE_BRANCH"
+          count=$(git rev-list --count "$base..$UPSTREAM_SHA")
+          {
+            echo "Brings in $count upstream commit(s) from bluesky-social/social-app \`main\` (up to \`${UPSTREAM_SHA:0:9}\`)."
+            echo
+            echo "**Merge with \"Create a merge commit\".** Squashing or rebasing loses the link to upstream's history, so the next sync would conflict again."
+            echo
+            if conflicts=$(git merge-tree --write-tree --name-only "$base" "$UPSTREAM_SHA"); then
+              echo "### Conflicts"
+              echo
+              echo "None: GitHub can merge this as is."
+            else
+              echo "### Conflicts"
+              echo
+              echo "GitHub can't merge this on its own. Merge locally as described in \`docs/cloudless-sky.md\` (\"Bringing in upstream changes\"). Conflicted files:"
+              echo
+              # The first line is the tree ID; conflicted file names follow,
+              # up to the first blank line.
+              echo "$conflicts" | sed -n '2,/^$/p' | sed '/^$/d' | sed 's/^/- `/; s/$/`/'
+            fi
+            echo
+            echo "### After merging"
+            echo
+            echo "Follow \"After the merge\" in \`docs/cloudless-sky.md\`: toolchain, translations, checks, a run of \`pnpm web\`, the modified-files list, then redeploy."
+            echo
+            echo "### Upstream files the fork changes that this touches"
+            echo
+            touched=$(git diff --name-only "$(git merge-base "$base" "$UPSTREAM_SHA")" "$UPSTREAM_SHA" \
+              | grep -Fx -f <(git diff --name-only --diff-filter=M "$(git merge-base "$base" "$UPSTREAM_SHA")" "$base") || true)
+            if [ -n "$touched" ]; then
+              echo "$touched" | sed 's/^/- `/; s/$/`/'
+            else
+              echo "None."
+            fi
+            echo
+            echo "### Upstream commits"
+            echo
+            git log --no-decorate --format='- %h %s' "$base..$UPSTREAM_SHA" | head -n 100
+            if [ "$count" -gt 100 ]; then
+              echo "- …and $((count - 100)) more"
+            fi
+          } > "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md"
+
+      - name: Open or update the pull request
+        if: steps.check.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+        run: |
+          title="Sync upstream ($(date -u +%Y-%m-%d))"
+          number=$(gh pr list --head "$SYNC_BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --head "$SYNC_BRANCH" --base "$BASE_BRANCH" \
+              --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
