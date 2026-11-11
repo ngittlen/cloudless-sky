@@ -132,8 +132,14 @@ function DialogInner({
     mutateAsync: updateProfileMutation,
     error: updateProfileError,
     isError: isUpdateProfileError,
-    isPending: isUpdatingProfile,
   } = useProfileUpdateMutation()
+  /*
+   * Covers the whole save, not just the profile mutation: links are written
+   * first, and a second save started meanwhile would create every new link's
+   * record again. The ref catches a second press before the re-render.
+   */
+  const [isSaving, setIsSaving] = useState(false)
+  const isSavingRef = useRef(false)
   const [imageError, setImageError] = useState('')
   const initialDisplayName = profile.displayName || ''
   const [displayName, setDisplayName] = useState(initialDisplayName)
@@ -234,6 +240,9 @@ function DialogInner({
   )
 
   const onPressSave = useCallback(async () => {
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+    setIsSaving(true)
     setImageError('')
     try {
       const nextLinks = linksDirty ? editedLinks : undefined
@@ -275,6 +284,9 @@ function DialogInner({
       Toast.show(_(msg({message: 'Profile updated', context: 'toast'})))
     } catch (e: any) {
       logger.error('Failed to update user profile', {message: String(e)})
+      // left set on success, so Save stays off while the dialog closes
+      isSavingRef.current = false
+      setIsSaving(false)
     }
   }, [
     updateProfileMutation,
@@ -331,10 +343,7 @@ function DialogInner({
         label={_(msg`Save`)}
         onPress={onPressSave}
         disabled={
-          !dirty ||
-          isUpdatingProfile ||
-          displayNameTooLong ||
-          descriptionTooLong
+          !dirty || isSaving || displayNameTooLong || descriptionTooLong
         }
         size="small"
         color="primary"
@@ -344,7 +353,7 @@ function DialogInner({
         <ButtonText style={[a.text_md, !dirty && t.atoms.text_contrast_low]}>
           <Trans>Save</Trans>
         </ButtonText>
-        {isUpdatingProfile && <ButtonIcon icon={Loader} />}
+        {isSaving && <ButtonIcon icon={Loader} />}
       </Button>
     ),
     [
@@ -352,7 +361,7 @@ function DialogInner({
       t,
       dirty,
       onPressSave,
-      isUpdatingProfile,
+      isSaving,
       displayNameTooLong,
       descriptionTooLong,
     ],
@@ -406,13 +415,13 @@ function DialogInner({
       <View style={[a.mt_4xl, a.px_xl, a.gap_xl]}>
         <View>
           <TextField.LabelText>
-            <Trans>Display name</Trans>
+            <Trans>Name</Trans>
           </TextField.LabelText>
           <TextField.Root isInvalid={displayNameTooLong}>
             <Dialog.Input
               value={displayName}
               onChangeText={setDisplayName}
-              label={_(msg`Display name`)}
+              label={_(msg`Name`)}
               placeholder={_(msg`e.g. Alice Lastname`)}
               testID="editProfileDisplayNameInput"
             />
@@ -427,7 +436,7 @@ function DialogInner({
               ]}>
               <Plural
                 value={MAX_DISPLAY_NAME}
-                other="Display name is too long. The maximum number of characters is #."
+                other="Name is too long. The maximum number of characters is #."
               />
             </Text>
           )}
@@ -453,6 +462,36 @@ function DialogInner({
               </Trans>
             </Admonition>
           )}
+
+        <View>
+          <TextField.LabelText>
+            <Trans>Bio</Trans>
+          </TextField.LabelText>
+          <TextField.Root isInvalid={descriptionTooLong}>
+            <Dialog.Input
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              label={_(msg`Bio`)}
+              placeholder={_(msg`Tell us a bit about yourself`)}
+              testID="editProfileDescriptionInput"
+            />
+          </TextField.Root>
+          {descriptionTooLong && (
+            <Text
+              style={[
+                a.text_sm,
+                a.mt_xs,
+                a.font_semi_bold,
+                {color: t.palette.negative_400},
+              ]}>
+              <Plural
+                value={MAX_DESCRIPTION}
+                other="Bio is too long. The maximum number of characters is #."
+              />
+            </Text>
+          )}
+        </View>
 
         <View>
           <TextField.LabelText>
@@ -520,36 +559,6 @@ function DialogInner({
             pronouns={pronouns}
             onSave={setPronouns}
           />
-        </View>
-
-        <View>
-          <TextField.LabelText>
-            <Trans>Description</Trans>
-          </TextField.LabelText>
-          <TextField.Root isInvalid={descriptionTooLong}>
-            <Dialog.Input
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              label={_(msg`Description`)}
-              placeholder={_(msg`Tell us a bit about yourself`)}
-              testID="editProfileDescriptionInput"
-            />
-          </TextField.Root>
-          {descriptionTooLong && (
-            <Text
-              style={[
-                a.text_sm,
-                a.mt_xs,
-                a.font_semi_bold,
-                {color: t.palette.negative_400},
-              ]}>
-              <Plural
-                value={MAX_DESCRIPTION}
-                other="Description is too long. The maximum number of characters is #."
-              />
-            </Text>
-          )}
         </View>
 
         {linksEnabled && links && (

@@ -14,7 +14,7 @@ import {PlayButtonIcon} from '#/components/video/PlayButtonIcon'
 import {IS_WEB} from '#/env'
 import {app} from '#/lexicons'
 import * as bsky from '#/types/bsky'
-import {getRowBorderColor, useItemContext} from './Root'
+import {useItemContext} from './Root'
 
 type Thumbnail = {
   /**
@@ -103,9 +103,9 @@ export function InlineImages({
 }: {
   embed: app.bsky.feed.defs.PostView['embed']
   /**
-   * 60 for a trailing preview, 80 when the images stand in for post text.
+   * The square's width and height.
    */
-  size: 60 | 80
+  size: number
   /**
    * Heavily blurs the thumbnails, for media behind a moderation warning. Get
    * this from `usePostMediaBlurred`, or from the post's `contentMedia`
@@ -198,8 +198,7 @@ function cornerRadius(isOuter: boolean) {
 
 /**
  * Outlined container for compact previews of feeds, starter packs, links and
- * quoted posts. Its border is the one the same embeds have in a post, but
- * for the dark theme's unread tint, see `getRowBorderColor`. It is
+ * quoted posts. Its border is the one the same embeds have in a post. It is
  * transparent on the unread tint, so it doesn't punch a white hole in the row.
  */
 export function Card({
@@ -219,7 +218,7 @@ export function Card({
         a.rounded_md,
         a.curve_continuous,
         a.border,
-        {borderColor: getRowBorderColor(t, !isRead)},
+        t.atoms.border_contrast_low,
         isRead && t.atoms.bg,
         style,
       ]}>
