@@ -737,7 +737,26 @@ Tailscale must be connected on the iPhone for the app to load.
 
 After merging upstream changes or fork changes into `main` and pushing to
 `origin` (see [Bringing in upstream changes](#bringing-in-upstream-changes)),
-in the VM:
+run the deploy script in the VM:
+
+```bash
+~/cloudless-sky/scripts/cloudless-deploy.sh
+```
+
+It refuses to run with uncommitted changes in the checkout. Otherwise it:
+
+1. pulls `main`;
+2. tags the running images `previous`;
+3. builds new images while the current containers keep serving;
+4. restarts the containers;
+5. waits up to 90 seconds for both servers to answer.
+
+If they don't answer, it prints the logs and puts the previous images back
+on its own. `--no-pull` rebuilds the current checkout without pulling, and
+`--rollback` goes back to the previous images (see below).
+`CLOUDLESS_HEALTH_TIMEOUT` changes the wait in seconds.
+
+The script runs these steps, which also work by hand:
 
 ```bash
 cd ~/cloudless-sky
