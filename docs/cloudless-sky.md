@@ -149,7 +149,7 @@ built and checked this way.
 | Tool | Version | Source of truth |
 | ---- | ------- | --------------- |
 | Node.js | 24.22.1 | `.nvmrc`; `package.json` `engines` (`>=24.22.1`) and `devEngines.runtime` (`^24.22.1`) |
-| pnpm | 11.28.5 | `package.json` `devEngines.packageManager`, provided by Corepack |
+| pnpm | 12.16.1 | `package.json` `devEngines.packageManager`, provided by Corepack |
 | nvm | any | Installs and switches Node versions |
 
 The default Node through nvm on the dev VM is v26, which is outside `^24`.
@@ -173,7 +173,7 @@ source ~/.nvm/nvm.sh
 nvm install          # installs the Node version in .nvmrc if missing
 nvm use              # switches this shell to it
 corepack enable      # installs the pnpm shim for this Node version
-pnpm install         # the first run asks to download pnpm 11.28.5; answer Y
+pnpm install         # the first run asks to download pnpm 12.16.1; answer Y
 ```
 
 Corepack installs its `pnpm` shim per Node version, so run `corepack enable`
