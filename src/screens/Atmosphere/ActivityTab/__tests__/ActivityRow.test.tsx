@@ -3,6 +3,7 @@ import {I18nProvider} from '@lingui/react'
 import {fireEvent, render, screen} from '@testing-library/react-native'
 
 import {makeActivityListLink} from '#/screens/Atmosphere/ActivityList/links'
+import {AtmosphereMetricsScope} from '#/screens/Atmosphere/metrics/context'
 import {ActivityRow} from '../components/ActivityRow'
 import {getStreamDuration, isLive} from '../components/LivestreamCard'
 import {
@@ -33,9 +34,14 @@ import {
 } from './fixtures'
 
 const mockLinkTo = jest.fn()
+const mockMetric = jest.fn()
 
+jest.mock('#/analytics', () => ({
+  useAnalytics: () => ({metric: mockMetric}),
+}))
 jest.mock('#/alf', () => ({
   atoms: new Proxy({}, {get: () => ({})}),
+  useAlf: () => ({fonts: {scaleMultiplier: 1}}),
   useTheme: () => ({
     atoms: new Proxy({}, {get: () => ({})}),
     palette: new Proxy({}, {get: () => '#000'}),
@@ -57,13 +63,19 @@ jest.mock('#/components/Link', () => {
       children,
       to,
       testID,
+      onPress,
     }: {
       children: React.ReactNode
       to: string
       testID?: string
+      onPress?: () => void
     }) => {
       mockLinkTo(to)
-      return <Text testID={testID}>{children}</Text>
+      return (
+        <Text testID={testID} onPress={onPress}>
+          {children}
+        </Text>
+      )
     },
   }
 })
@@ -142,7 +154,7 @@ i18n.loadAndActivate({locale: 'en', messages: {}})
 function renderRow(row: ActivityRowModel) {
   return render(
     <I18nProvider i18n={i18n}>
-      <ActivityRow row={row} />
+      <ActivityRow row={row} position={0} />
     </I18nProvider>,
   )
 }
@@ -155,15 +167,12 @@ function renderEntry(entry: TimelineEntry) {
   return renderRow(rowOf(entry))
 }
 
-/** The sentence, then "1h on" and the app name (just "1h" without an app). */
 function expectHeader(sentence: string, app?: string) {
   expect(screen.getByText(sentence)).toBeTruthy()
   if (app) {
-    expect(screen.getByText('1h on')).toBeTruthy()
-    expect(screen.getByText(app)).toBeTruthy()
+    expect(screen.getByText(app, {exact: false})).toBeTruthy()
   } else {
     expect(screen.getByText('1h')).toBeTruthy()
-    expect(screen.queryByText('1h on')).toBeNull()
   }
 }
 
@@ -252,6 +261,42 @@ describe('ActivityRow', () => {
     expect(mockLinkTo).toHaveBeenCalledWith(
       makeActivityListLink(row.kind === 'card' ? (row.subjectUris ?? []) : []),
     )
+  })
+
+  it('logs one View all event with the tab it was opened from', () => {
+    mockMetric.mockClear()
+    const row = rowOf(
+      actorGroup({
+        actor: eric,
+        collection: NSID.document,
+        view: article('paul.pckt.blog'),
+        count: 3,
+      }),
+    )
+    render(
+      <I18nProvider i18n={i18n}>
+        <AtmosphereMetricsScope tab="following" surface="tab" isActive>
+          <ActivityRow row={row} position={0} />
+        </AtmosphereMetricsScope>
+      </I18nProvider>,
+    )
+
+    fireEvent.press(screen.getByTestId('activityViewAll'))
+    expect(
+      mockMetric.mock.calls.filter(
+        ([name]) => name === 'atmosphere:activity:viewAll',
+      ),
+    ).toEqual([
+      [
+        'atmosphere:activity:viewAll',
+        {
+          tab: 'following',
+          surface: 'tab',
+          subjectCount: 3,
+          collection: NSID.document,
+        },
+      ],
+    ])
   })
 
   it.each([

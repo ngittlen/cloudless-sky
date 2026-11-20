@@ -80,12 +80,6 @@
     }
   },
   "src/analytics/metrics/client.test.ts": {
-    "typescript/no-explicit-any": {
-      "count": 1
-    },
-    "typescript/no-unsafe-member-access": {
-      "count": 8
-    },
     "typescript/require-await": {
       "count": 5
     }
@@ -448,6 +442,11 @@
   "src/components/verification/VerificationRemovePrompt.tsx": {
     "typescript/no-misused-promises": {
       "count": 1
+    }
+  },
+  "src/features/feedFeedback/index.tsx": {
+    "typescript/no-explicit-any": {
+      "count": 3
     }
   },
   "src/features/liveEvents/preferences.ts": {
@@ -923,11 +922,6 @@
   "src/state/cache/types.ts": {
     "typescript/no-explicit-any": {
       "count": 1
-    }
-  },
-  "src/state/feed-feedback.tsx": {
-    "typescript/no-explicit-any": {
-      "count": 3
     }
   },
   "src/state/gallery.ts": {
